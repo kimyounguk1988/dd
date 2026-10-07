@@ -1,0 +1,609 @@
+<title>섬 산책 놀이터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&family=Gowun+Dodum&display=swap">
+<style>
+  /* Layout: full-screen 3D island, one floating control card bottom-left, hint chip top-center */
+  :root {
+    --sky: #bfe6f5;
+    --panel: rgba(255, 252, 240, 0.94);
+    --ink: #3d3324;
+    --muted: #7b6c55;
+    --accent: #2e9a68;
+    --accent-ink: #ffffff;
+    --line: rgba(61, 51, 36, 0.16);
+    --error: #c2492f;
+    --font-display: "Jua", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    --font-body: "Gowun Dodum", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --panel: rgba(38, 34, 28, 0.94);
+      --ink: #f3ead8;
+      --muted: #b9ab92;
+      --accent: #4cc48c;
+      --accent-ink: #10231a;
+      --line: rgba(243, 234, 216, 0.16);
+      --error: #f08a6e;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --panel: rgba(38, 34, 28, 0.94);
+    --ink: #f3ead8;
+    --muted: #b9ab92;
+    --accent: #4cc48c;
+    --accent-ink: #10231a;
+    --line: rgba(243, 234, 216, 0.16);
+    --error: #f08a6e;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body {
+    background: var(--sky);
+    color: var(--ink);
+    font-family: var(--font-body);
+    overflow: hidden;
+    touch-action: none;
+  }
+  #stage { position: fixed; inset: 0; display: block; width: 100%; height: 100%; }
+
+  .hint {
+    position: fixed;
+    top: calc(12px + env(safe-area-inset-top, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 13px;
+    color: var(--muted);
+    white-space: nowrap;
+    max-width: calc(100% - 32px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .card {
+    position: fixed;
+    left: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    width: min(340px, calc(100% - 32px));
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 14px 16px;
+    display: grid;
+    gap: 10px;
+    box-shadow: 0 8px 24px rgba(30, 60, 40, 0.18);
+  }
+  .card h1 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 20px;
+    letter-spacing: 0.01em;
+  }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .btn {
+    font-family: var(--font-display);
+    font-size: 15px;
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--ink);
+    border-radius: 999px;
+    padding: 7px 14px;
+    cursor: pointer;
+  }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+  .btn:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  label.field { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  select {
+    font: inherit;
+    font-size: 14px;
+    color: var(--ink);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 6px 8px;
+  }
+  .status { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+  .status.error { color: var(--error); }
+  .note { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--muted); }
+
+  .drop {
+    position: fixed;
+    inset: 12px;
+    border: 3px dashed var(--accent);
+    border-radius: 24px;
+    background: rgba(46, 154, 104, 0.12);
+    display: grid;
+    place-items: center;
+    font-family: var(--font-display);
+    font-size: 24px;
+    color: var(--ink);
+    pointer-events: none;
+  }
+  input[type="file"] { display: none; }
+</style>
+
+<canvas id="stage" aria-label="3D 섬 화면"></canvas>
+<div class="hint" id="hint">WASD·방향키로 이동 · 땅을 탭하면 그 자리로 · 휠로 줌</div>
+
+<section class="card" aria-label="캐릭터 설정">
+  <h1>섬 산책 놀이터</h1>
+  <div class="row">
+    <button class="btn primary" id="openFiles" type="button">모델 파일 열기</button>
+    <button class="btn" id="openFolder" type="button">폴더 열기</button>
+  </div>
+  <label class="field" for="animSelect">애니메이션
+    <select id="animSelect" disabled>
+      <option value="auto">자동 (멈추면 대기, 움직이면 걷기)</option>
+    </select>
+  </label>
+  <div class="row">
+    <button class="btn" id="flip" type="button">방향 180° 돌리기</button>
+    <button class="btn" id="reset" type="button">샘플로 되돌리기</button>
+  </div>
+  <p class="status" id="status" role="status">샘플 주민으로 시작했어. 받은 .dae / .fbx / .glb 파일을 텍스처 이미지랑 같이 열거나 화면에 끌어다 놓으면 바뀌어.</p>
+  <p class="note">파일은 이 브라우저 안에서만 읽어. 어디에도 업로드하지 않아.</p>
+  <input type="file" id="fileInput" multiple accept=".dae,.fbx,.glb,.gltf,.bin,.png,.jpg,.jpeg,.tga,.webp,.bmp">
+  <input type="file" id="folderInput" webkitdirectory multiple>
+</section>
+
+<div class="drop" id="drop" hidden>여기에 놓으면 캐릭터가 바뀌어</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { ColladaLoader } from 'three/addons/loaders/ColladaLoader.js';
+import { TGALoader } from 'three/addons/loaders/TGALoader.js';
+
+const $ = (id) => document.getElementById(id);
+const statusEl = $('status');
+const animSelect = $('animSelect');
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function setStatus(msg, isError = false) {
+  statusEl.textContent = msg;
+  statusEl.classList.toggle('error', isError);
+}
+
+// ---------- scene ----------
+const canvas = $('stage');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xbfe6f5);
+scene.fog = new THREE.Fog(0xbfe6f5, 28, 70);
+
+const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 200);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x88b866, 1.3));
+const sun = new THREE.DirectionalLight(0xfff1d6, 2.2);
+sun.position.set(8, 14, 6);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -14, right: 14, top: 14, bottom: -14, near: 1, far: 50 });
+scene.add(sun, sun.target);
+
+const ISLAND_R = 28;
+const grass = new THREE.Mesh(
+  new THREE.CylinderGeometry(ISLAND_R, ISLAND_R + 0.4, 1, 72),
+  new THREE.MeshLambertMaterial({ color: 0x86c95f })
+);
+grass.position.y = -0.5;
+grass.receiveShadow = true;
+const sand = new THREE.Mesh(
+  new THREE.CylinderGeometry(ISLAND_R + 3, ISLAND_R + 4, 0.9, 72),
+  new THREE.MeshLambertMaterial({ color: 0xf0dfab })
+);
+sand.position.y = -0.56;
+sand.receiveShadow = true;
+const water = new THREE.Mesh(
+  new THREE.PlaneGeometry(400, 400),
+  new THREE.MeshLambertMaterial({ color: 0x5ec4e0 })
+);
+water.rotation.x = -Math.PI / 2;
+water.position.y = -0.62;
+scene.add(grass, sand, water);
+
+// deterministic decoration
+let seed = 7;
+const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+const trees = [];
+const trunkMat = new THREE.MeshLambertMaterial({ color: 0x9b6a43 });
+const leafMats = [0x4fa64a, 0x5cb85a, 0x3f9645].map((c) => new THREE.MeshLambertMaterial({ color: c, flatShading: true }));
+for (let i = 0; i < 26; i++) {
+  const a = rand() * Math.PI * 2;
+  const r = 6 + rand() * (ISLAND_R - 8);
+  const x = Math.cos(a) * r, z = Math.sin(a) * r;
+  const t = new THREE.Group();
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.26, 1.4, 8), trunkMat);
+  trunk.position.y = 0.7;
+  const leaves = new THREE.Mesh(new THREE.IcosahedronGeometry(1 + rand() * 0.3, 0), leafMats[i % 3]);
+  leaves.position.y = 2;
+  leaves.scale.y = 1.15;
+  for (const m of [trunk, leaves]) { m.castShadow = true; m.receiveShadow = true; }
+  t.add(trunk, leaves);
+  t.position.set(x, 0, z);
+  scene.add(t);
+  trees.push({ x, z, r: 0.75 });
+}
+const flowerColors = [0xffffff, 0xffd94a, 0xff8fb1, 0xff6b5b];
+for (let i = 0; i < 90; i++) {
+  const a = rand() * Math.PI * 2, r = 2 + rand() * (ISLAND_R - 3);
+  const f = new THREE.Mesh(
+    new THREE.SphereGeometry(0.09, 6, 6),
+    new THREE.MeshLambertMaterial({ color: flowerColors[i % 4] })
+  );
+  f.position.set(Math.cos(a) * r, 0.08, Math.sin(a) * r);
+  scene.add(f);
+}
+
+const marker = new THREE.Mesh(
+  new THREE.RingGeometry(0.25, 0.38, 32),
+  new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 })
+);
+marker.rotation.x = -Math.PI / 2;
+marker.position.y = 0.02;
+marker.visible = false;
+scene.add(marker);
+
+// ---------- player ----------
+const player = new THREE.Group();
+scene.add(player);
+const turn = new THREE.Group(); // holds the 180° flip
+player.add(turn);
+
+let avatar = null;      // current visual root inside `turn`
+let sample = null;      // parts of the procedural sample villager
+let mixer = null;
+let actions = [];       // { name, action }
+let idleAction = null, walkAction = null, current = null;
+let blobUrls = [];
+
+function makeSample() {
+  const root = new THREE.Group();
+  const mat = (c) => new THREE.MeshLambertMaterial({ color: c });
+  const fur = mat(0xf3c58f), shirt = mat(0x5aa9e6), dark = mat(0x2b2118), pink = mat(0xff9fae), pants = mat(0x6b5a8e);
+
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.36, 20, 16), shirt);
+  body.scale.set(1, 1.05, 0.9);
+  body.position.y = 0.62;
+
+  const head = new THREE.Group();
+  head.position.y = 1.22;
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.5, 24, 20), fur);
+  skull.scale.set(1.08, 0.95, 1);
+  const muzzle = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 12), mat(0xfff0dc));
+  muzzle.position.set(0, -0.12, 0.42);
+  muzzle.scale.set(1.2, 0.8, 0.7);
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), dark);
+  nose.position.set(0, -0.06, 0.55);
+  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.065, 12, 10), dark);
+  eyeL.position.set(-0.18, 0.06, 0.45);
+  const eyeR = eyeL.clone(); eyeR.position.x = 0.18;
+  const blushL = new THREE.Mesh(new THREE.CircleGeometry(0.07, 16), pink);
+  blushL.position.set(-0.3, -0.08, 0.41); blushL.rotation.y = -0.5;
+  const blushR = blushL.clone(); blushR.position.x = 0.3; blushR.rotation.y = 0.5;
+  const earGeo = new THREE.ConeGeometry(0.16, 0.32, 4);
+  const earL = new THREE.Mesh(earGeo, fur);
+  earL.position.set(-0.3, 0.45, 0); earL.rotation.z = 0.35;
+  const earR = earL.clone(); earR.position.x = 0.3; earR.rotation.z = -0.35;
+  head.add(skull, muzzle, nose, eyeL, eyeR, blushL, blushR, earL, earR);
+
+  const limb = (geo, m, x, y) => {
+    const pivot = new THREE.Group();
+    pivot.position.set(x, y, 0);
+    const mesh = new THREE.Mesh(geo, m);
+    mesh.position.y = -geo.parameters.height / 2;
+    pivot.add(mesh);
+    return pivot;
+  };
+  const legGeo = new THREE.CylinderGeometry(0.09, 0.1, 0.36, 10);
+  const armGeo = new THREE.CylinderGeometry(0.07, 0.07, 0.34, 10);
+  const legL = limb(legGeo, pants, -0.14, 0.38);
+  const legR = limb(legGeo, pants, 0.14, 0.38);
+  const armL = limb(armGeo, fur, -0.38, 0.82);
+  const armR = limb(armGeo, fur, 0.38, 0.82);
+  armL.rotation.z = 0.25; armR.rotation.z = -0.25;
+
+  root.add(body, head, legL, legR, armL, armR);
+  root.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return { root, body, head, legL, legR, armL, armR };
+}
+
+function clearAvatar() {
+  if (avatar) {
+    turn.remove(avatar);
+    avatar.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+      mats.forEach((m) => { for (const k in m) if (m[k] && m[k].isTexture) m[k].dispose(); m.dispose(); });
+    });
+  }
+  if (mixer) mixer.stopAllAction();
+  mixer = null; actions = []; idleAction = walkAction = current = null;
+  sample = null; avatar = null;
+  blobUrls.forEach((u) => URL.revokeObjectURL(u));
+  blobUrls = [];
+  animSelect.innerHTML = '<option value="auto">자동 (멈추면 대기, 움직이면 걷기)</option>';
+  animSelect.disabled = true;
+}
+
+function useSample() {
+  clearAvatar();
+  sample = makeSample();
+  avatar = sample.root;
+  turn.add(avatar);
+  turn.rotation.y = 0;
+}
+
+// ---------- file loading ----------
+function fitToHeight(obj, target = 1.7) {
+  obj.updateMatrixWorld(true);
+  let box = new THREE.Box3().setFromObject(obj);
+  const h = box.max.y - box.min.y;
+  if (!isFinite(h) || h <= 0) return;
+  obj.scale.multiplyScalar(target / h);
+  obj.updateMatrixWorld(true);
+  box = new THREE.Box3().setFromObject(obj);
+  const c = box.getCenter(new THREE.Vector3());
+  obj.position.x -= c.x;
+  obj.position.z -= c.z;
+  obj.position.y -= box.min.y;
+}
+
+function pickClip(re) {
+  return actions.find((a) => re.test(a.name))?.action || null;
+}
+
+function play(action) {
+  if (!action || action === current) return;
+  action.reset().setEffectiveWeight(1).fadeIn(0.25).play();
+  if (current) current.fadeOut(0.25);
+  current = action;
+}
+
+async function loadFiles(fileList) {
+  const files = [...fileList];
+  const main = files.find((f) => /\.(glb|gltf|fbx|dae)$/i.test(f.name));
+  if (!main) {
+    setStatus('모델 파일(.dae .fbx .glb .gltf)을 못 찾았어. 모델 파일이랑 텍스처 이미지를 같이 골라줘.', true);
+    return;
+  }
+  setStatus(`${main.name} 불러오는 중…`);
+
+  const urls = new Map();
+  const newBlobs = [];
+  for (const f of files) {
+    const u = URL.createObjectURL(f);
+    newBlobs.push(u);
+    urls.set(f.name.toLowerCase(), u);
+  }
+  const mainUrl = urls.get(main.name.toLowerCase());
+  const missing = new Set();
+
+  const manager = new THREE.LoadingManager();
+  manager.setURLModifier((url) => {
+    if (url === mainUrl || url.startsWith('data:')) return url;
+    const base = decodeURIComponent(url.split(/[\\/]/).pop().split('?')[0]).toLowerCase();
+    if (urls.has(base)) return urls.get(base);
+    if (base) missing.add(base);
+    return url;
+  });
+  manager.addHandler(/\.tga$/i, new TGALoader(manager));
+
+  const ext = main.name.split('.').pop().toLowerCase();
+  let obj, clips;
+  try {
+    if (ext === 'dae') {
+      const c = await new ColladaLoader(manager).loadAsync(mainUrl);
+      obj = c.scene; clips = c.scene.animations || [];
+    } else if (ext === 'fbx') {
+      obj = await new FBXLoader(manager).loadAsync(mainUrl);
+      clips = obj.animations || [];
+    } else {
+      const g = await new GLTFLoader(manager).loadAsync(mainUrl);
+      obj = g.scene; clips = g.animations || [];
+    }
+  } catch (err) {
+    newBlobs.forEach((u) => URL.revokeObjectURL(u));
+    setStatus(`불러오기 실패: ${err?.message || err}. 다른 포맷(.fbx/.dae)으로 받아서 다시 해봐.`, true);
+    return;
+  }
+
+  clearAvatar();
+  blobUrls = newBlobs;
+  obj.traverse((o) => {
+    if (o.isMesh) {
+      o.castShadow = true;
+      o.frustumCulled = false;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      mats.forEach((m) => {
+        if (!m) return;
+        if (m.map) m.map.colorSpace = THREE.SRGBColorSpace;
+        if (m.map && m.transparent) m.alphaTest = 0.4;
+      });
+    }
+  });
+  fitToHeight(obj);
+  avatar = new THREE.Group();
+  avatar.add(obj);
+  turn.add(avatar);
+
+  if (clips.length) {
+    mixer = new THREE.AnimationMixer(obj);
+    actions = clips.map((clip, i) => ({ name: clip.name || `clip ${i + 1}`, action: mixer.clipAction(clip) }));
+    idleAction = pickClip(/idle|wait|stand|breath/i) || actions[0].action;
+    walkAction = pickClip(/walk|run|move/i) || (actions.length > 1 ? actions[1].action : actions[0].action);
+    for (const a of actions) {
+      const opt = document.createElement('option');
+      opt.value = a.name;
+      opt.textContent = a.name;
+      animSelect.appendChild(opt);
+    }
+    animSelect.disabled = false;
+    play(idleAction);
+  }
+
+  const animNote = clips.length
+    ? `애니메이션 ${clips.length}개 찾았어.`
+    : '애니메이션이 없어서 통통 튀는 걸음으로 대신 움직여.';
+  const texNote = missing.size
+    ? ` 텍스처 ${missing.size}개를 못 찾았어 (${[...missing].slice(0, 3).join(', ')}${missing.size > 3 ? ' …' : ''}). 폴더 열기로 다시 해봐.`
+    : '';
+  setStatus(`${main.name} 불러왔어. ${animNote}${texNote}`, missing.size > 0);
+}
+
+$('openFiles').addEventListener('click', () => $('fileInput').click());
+$('openFolder').addEventListener('click', () => $('folderInput').click());
+$('fileInput').addEventListener('change', (e) => { if (e.target.files.length) loadFiles(e.target.files); e.target.value = ''; });
+$('folderInput').addEventListener('change', (e) => { if (e.target.files.length) loadFiles(e.target.files); e.target.value = ''; });
+$('reset').addEventListener('click', () => { useSample(); setStatus('샘플 주민으로 돌아왔어.'); });
+$('flip').addEventListener('click', () => { turn.rotation.y = turn.rotation.y ? 0 : Math.PI; });
+animSelect.addEventListener('change', () => {
+  if (animSelect.value === 'auto') { current = null; mixer?.stopAllAction(); play(idleAction); return; }
+  const a = actions.find((x) => x.name === animSelect.value);
+  if (a) play(a.action);
+});
+
+const drop = $('drop');
+let dragDepth = 0;
+addEventListener('dragenter', (e) => { e.preventDefault(); dragDepth++; drop.hidden = false; });
+addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; drop.hidden = true; } });
+addEventListener('dragover', (e) => e.preventDefault());
+addEventListener('drop', (e) => {
+  e.preventDefault();
+  dragDepth = 0; drop.hidden = true;
+  if (e.dataTransfer?.files?.length) loadFiles(e.dataTransfer.files);
+});
+
+// ---------- input ----------
+const keys = new Set();
+const MOVE_KEYS = { KeyW: [0, -1], ArrowUp: [0, -1], KeyS: [0, 1], ArrowDown: [0, 1], KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0] };
+addEventListener('keydown', (e) => {
+  if (e.target.closest && e.target.closest('select')) return;
+  if (MOVE_KEYS[e.code]) { keys.add(e.code); target = null; marker.visible = false; e.preventDefault(); }
+});
+addEventListener('keyup', (e) => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+
+let target = null;
+let downAt = null;
+const ray = new THREE.Raycaster();
+canvas.addEventListener('pointerdown', (e) => { downAt = { x: e.clientX, y: e.clientY }; });
+canvas.addEventListener('pointerup', (e) => {
+  if (!downAt || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 8) return;
+  const r = canvas.getBoundingClientRect();
+  ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+  const hit = ray.intersectObject(grass)[0];
+  if (hit) {
+    target = new THREE.Vector3(hit.point.x, 0, hit.point.z);
+    marker.position.set(target.x, 0.02, target.z);
+    marker.visible = true;
+  }
+});
+
+let camDist = 11;
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  camDist = THREE.MathUtils.clamp(camDist + e.deltaY * 0.01, 5, 20);
+}, { passive: false });
+
+// ---------- loop ----------
+const SPEED = 3.2;
+const clock = new THREE.Clock();
+let phase = 0;
+let moving = false;
+const camPos = new THREE.Vector3();
+const lookAt = new THREE.Vector3();
+
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+
+function step(dt) {
+  const dir = new THREE.Vector3();
+  for (const k of keys) { dir.x += MOVE_KEYS[k][0]; dir.z += MOVE_KEYS[k][1]; }
+  if (target) {
+    dir.set(target.x - player.position.x, 0, target.z - player.position.z);
+    if (dir.length() < 0.12) { target = null; marker.visible = false; dir.set(0, 0, 0); }
+  }
+  moving = dir.lengthSq() > 0;
+  if (moving) {
+    dir.normalize();
+    const next = player.position.clone().addScaledVector(dir, SPEED * dt);
+    for (const t of trees) {
+      const dx = next.x - t.x, dz = next.z - t.z, d = Math.hypot(dx, dz);
+      if (d < t.r + 0.35) { const s = (t.r + 0.35) / (d || 1); next.x = t.x + dx * s; next.z = t.z + dz * s; }
+    }
+    const rr = Math.hypot(next.x, next.z);
+    if (rr > ISLAND_R - 0.8) next.multiplyScalar((ISLAND_R - 0.8) / rr);
+    player.position.copy(next);
+    const want = Math.atan2(dir.x, dir.z);
+    let diff = want - player.rotation.y;
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    player.rotation.y += diff * Math.min(1, dt * 12);
+    phase += dt * 9;
+  } else {
+    phase += dt * 2;
+  }
+
+  // animation
+  if (mixer) {
+    if (animSelect.value === 'auto') play(moving ? walkAction : idleAction);
+    mixer.update(dt);
+  } else if (sample) {
+    const swing = moving ? Math.sin(phase) * 0.7 : 0;
+    sample.legL.rotation.x = swing;
+    sample.legR.rotation.x = -swing;
+    sample.armL.rotation.x = -swing * 0.8;
+    sample.armR.rotation.x = swing * 0.8;
+    const bob = moving ? Math.abs(Math.sin(phase)) * 0.06 : (reduceMotion ? 0 : Math.sin(phase) * 0.015);
+    sample.root.position.y = bob;
+    sample.head.rotation.z = moving ? Math.sin(phase) * 0.06 : 0;
+  } else if (avatar) {
+    avatar.position.y = moving ? Math.abs(Math.sin(phase)) * 0.08 : 0;
+    avatar.rotation.z = moving ? Math.sin(phase) * 0.07 : 0;
+  }
+
+  if (marker.visible && !reduceMotion) marker.scale.setScalar(1 + Math.sin(clock.elapsedTime * 6) * 0.1);
+
+  // camera: high, fixed angle like a top-down island view
+  camPos.set(player.position.x, camDist * 0.72, player.position.z + camDist * 0.78);
+  camera.position.lerp(camPos, Math.min(1, dt * 5));
+  lookAt.set(player.position.x, 0.8, player.position.z);
+  camera.lookAt(lookAt);
+
+  sun.position.set(player.position.x + 8, 14, player.position.z + 6);
+  sun.target.position.copy(player.position);
+}
+
+useSample();
+camera.position.set(0, camDist * 0.72, camDist * 0.78);
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  step(dt);
+  renderer.render(scene, camera);
+});
+</script>
