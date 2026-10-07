@@ -536,15 +536,19 @@ async function loadFiles(fileList) {
   const ext = main.name.split('.').pop().toLowerCase();
   let obj, clips;
   try {
+    // Parse the model from memory: the artifact viewer's CSP refuses fetch() on blob: URLs,
+    // so loader.load(blobUrl) fails there. Textures still go through <img>, which is allowed.
+    const base = 'local/';
     if (ext === 'dae') {
-      const c = await new ColladaLoader(manager).loadAsync(mainUrl);
+      const c = new ColladaLoader(manager).parse(await main.text(), base);
       obj = c.scene; clips = c.scene.animations || [];
       await restoreColladaBoneNames(main, obj);
     } else if (ext === 'fbx') {
-      obj = await new FBXLoader(manager).loadAsync(mainUrl);
+      obj = new FBXLoader(manager).parse(await main.arrayBuffer(), base);
       clips = obj.animations || [];
     } else {
-      const g = await new GLTFLoader(manager).loadAsync(mainUrl);
+      const data = ext === 'gltf' ? await main.text() : await main.arrayBuffer();
+      const g = await new Promise((res, rej) => new GLTFLoader(manager).parse(data, base, res, rej));
       obj = g.scene; clips = g.animations || [];
     }
   } catch (err) {
