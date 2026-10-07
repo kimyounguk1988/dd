@@ -258,10 +258,32 @@
       <label class="choice"><input type="radio" name="mode" value="free"> 연습 모드</label>
     </div>
   </fieldset>
+  <label class="field" for="instrumentSelect">악기
+    <select id="instrumentSelect">
+      <option value="piano">그랜드 피아노</option>
+      <option value="music_box">오르골</option>
+      <option value="celesta">첼레스타</option>
+      <option value="vibraphone">비브라폰</option>
+      <option value="marimba">마림바</option>
+      <option value="kalimba">칼림바</option>
+      <option value="acoustic_guitar_nylon">나일론 기타</option>
+      <option value="violin">바이올린</option>
+      <option value="flute">플루트</option>
+    </select>
+  </label>
   <fieldset id="songFields">
     <legend>악보</legend>
     <label class="choice"><input type="radio" name="song" value="canon" checked>
       <span><strong>캐논 D장조 · 파헬벨</strong><small>♩=76 · 쉬움 33 · 보통 97 · 어려움 178노트</small></span></label>
+    <label class="choice"><input type="radio" name="song" value="midi">
+      <span><strong>MIDI 파일로 만들기</strong><small id="midiInfo">가진 .mid 파일을 고르면 채보를 자동으로 만들어</small></span></label>
+    <div class="row">
+      <button class="btn" id="midiPick" type="button">MIDI 파일 고르기</button>
+      <input type="file" id="midiFile" accept=".mid,.midi,audio/midi">
+    </div>
+    <label class="field" for="midiTrack" id="midiTrackField" hidden>멜로디로 칠 트랙
+      <select id="midiTrack"></select>
+    </label>
     <legend>난이도</legend>
     <div class="seg">
       <label class="choice"><input type="radio" name="level" value="easy"> 쉬움</label>
@@ -270,7 +292,7 @@
     </div>
     <label class="choice"><input type="checkbox" id="autoPlay"> <span>자동 연주로 감상하기<small>노트를 대신 쳐줘</small></span></label>
   </fieldset>
-  <p class="note">피아노 소리: Salamander Grand Piano (Alexander Holm, CC BY 3.0)</p>
+  <p class="note">소리: Salamander Grand Piano (Alexander Holm, CC BY 3.0) · 그 외 악기 FluidR3 GM via gleitz/midi-js-soundfonts (CC BY 3.0)</p>
   <p class="note">건반 12개(한 옥타브). 노트가 떨어지는 건반을 노란 선에서 눌러. 키보드는 A~J가 흰건반, W·E·T·Y·U가 검은건반이야. 연습 모드에선 Z·X로 옥타브, Space로 페달.</p>
   <div class="row">
     <button class="btn primary" id="startSong" type="button">시작</button>
@@ -1078,7 +1100,7 @@ function buildChart(song, levelKey) {
     }
   }
   const clicks = Array.from({ length: COUNT_IN }, (_, i) => i * spb);
-  return { notes, accomp, clicks, spb, fall: level.fall, label: level.label, end: (COUNT_IN + musicBeats + 4) * spb };
+  return { notes, accomp, clicks, spb, fall: level.fall, label: level.label, title: song.title, end: (COUNT_IN + musicBeats + 4) * spb };
 }
 
 // --- sound ---
@@ -1090,8 +1112,33 @@ let bus = null;      // compressor + light reverb shared by every session
 const SAMPLE_ROOTS = [];
 for (let o = 2; o <= 6; o++) for (const [n, pc] of [['C', 0], ['Ds', 3], ['Fs', 6], ['A', 9]]) SAMPLE_ROOTS.push({ file: `${n}${o}`, midi: 12 * (o + 1) + pc });
 SAMPLE_ROOTS.push({ file: 'C7', midi: 96 });
-const pianoBuffers = new Map(); // root midi → AudioBuffer
-let samplesLoading = null;
+// Other instruments: FluidR3 GM soundfont renders from gleitz/midi-js-soundfonts (CC BY 3.0),
+// same minor-third layout as the piano.
+const INSTRUMENTS = {
+  piano: { label: '그랜드 피아노', dir: 'samples/salamander', gain: 0.85 },
+  music_box: { label: '오르골', dir: 'samples/fluidr3/music_box', gain: 0.8 },
+  celesta: { label: '첼레스타', dir: 'samples/fluidr3/celesta', gain: 0.8 },
+  vibraphone: { label: '비브라폰', dir: 'samples/fluidr3/vibraphone', gain: 0.8 },
+  marimba: { label: '마림바', dir: 'samples/fluidr3/marimba', gain: 0.9 },
+  kalimba: { label: '칼림바', dir: 'samples/fluidr3/kalimba', gain: 0.9 },
+  acoustic_guitar_nylon: { label: '나일론 기타', dir: 'samples/fluidr3/acoustic_guitar_nylon', gain: 0.9 },
+  violin: { label: '바이올린', dir: 'samples/fluidr3/violin', gain: 0.7 },
+  flute: { label: '플루트', dir: 'samples/fluidr3/flute', gain: 0.7 },
+};
+const instBuffers = {};  // instrument → Map(root midi → AudioBuffer)
+const instLoading = {};
+function loadInstrument(key) {
+  if (!INSTRUMENTS[key]) key = 'piano';
+  instBuffers[key] ||= new Map();
+  instLoading[key] ||= Promise.all(SAMPLE_ROOTS.map(async ({ file, midi }) => {
+    try {
+      const res = await fetch(`${INSTRUMENTS[key].dir}/${file}.mp3`);
+      if (!res.ok) return;
+      instBuffers[key].set(midi, await actx.decodeAudioData(await res.arrayBuffer()));
+    } catch { /* missing sample: that range falls back to the nearest loaded one or the synth */ }
+  }));
+  return instLoading[key];
+}
 
 function initAudio() {
   if (!actx) {
@@ -1116,14 +1163,8 @@ function initAudio() {
     comp.connect(actx.destination);
   }
   actx.resume();
-  samplesLoading ||= Promise.all(SAMPLE_ROOTS.map(async ({ file, midi }) => {
-    try {
-      const res = await fetch(`samples/salamander/${file}.mp3`);
-      if (!res.ok) return;
-      pianoBuffers.set(midi, await actx.decodeAudioData(await res.arrayBuffer()));
-    } catch { /* missing sample: that range falls back to the nearest loaded one or the synth */ }
-  }));
-  return samplesLoading;
+  loadInstrument('piano');
+  return loadInstrument($('instrumentSelect').value);
 }
 function ensureAudio() {
   initAudio();
@@ -1133,23 +1174,27 @@ function ensureAudio() {
   master.connect(bus);
 }
 
-function nearestRoot(midi) {
+function nearestRoot(buffers, midi) {
   let best = null;
-  for (const root of pianoBuffers.keys()) if (best === null || Math.abs(root - midi) < Math.abs(best - midi)) best = root;
+  for (const root of buffers.keys()) if (best === null || Math.abs(root - midi) < Math.abs(best - midi)) best = root;
   return best;
 }
 
 // Starts a note and returns a voice whose release() lets it fade like a piano damper.
 // With dur, the note releases on its own after that many seconds.
-function playNote(midi, when = actx.currentTime, vel = 0.8, dur = null) {
+function playNote(midi, when = actx.currentTime, vel = 0.8, dur = null, inst = 'piano') {
   const g = actx.createGain();
   g.connect(master);
-  const root = nearestRoot(midi);
+  // an instrument still loading borrows the piano
+  let buffers = instBuffers[inst];
+  if (!buffers || !buffers.size) { buffers = instBuffers.piano || new Map(); inst = 'piano'; }
+  vel *= INSTRUMENTS[inst].gain / 0.85;
+  const root = nearestRoot(buffers, midi);
   let stopAt = Infinity;
   let src;
   if (root !== null) {
     src = actx.createBufferSource();
-    src.buffer = pianoBuffers.get(root);
+    src.buffer = buffers.get(root);
     src.playbackRate.value = Math.pow(2, (midi - root) / 12);
     g.gain.setValueAtTime(vel, when);
     src.connect(g);
@@ -1243,7 +1288,7 @@ function dipPianoKey(midi) {
 
 // --- state ---
 const perf = {
-  active: false, mode: 'song', song: 'canon', level: 'normal', auto: false,
+  active: false, mode: 'song', song: 'canon', level: 'normal', auto: false, instrument: 'piano', accompIdx: 0,
   chart: null, t0: 0, now: 0, octave: 4,
   combo: 0, maxCombo: 0, score: 0,
   counts: { PERFECT: 0, GREAT: 0, GOOD: 0, MISS: 0 },
@@ -1280,14 +1325,21 @@ $('cancelSong').addEventListener('click', () => { $('songSheet').hidden = true; 
 $('startSong').addEventListener('click', () => {
   perf.mode = document.querySelector('input[name="mode"]:checked').value;
   perf.song = document.querySelector('input[name="song"]:checked').value;
+  perf.instrument = $('instrumentSelect').value;
+  if (perf.mode === 'song' && perf.song === 'midi' && !midiSong) {
+    $('midiInfo').textContent = '먼저 MIDI 파일을 골라줘.';
+    return;
+  }
   perf.level = document.querySelector('input[name="level"]:checked').value;
   perf.auto = $('autoPlay').checked;
   $('songSheet').hidden = true;
+  loadInstrument(perf.instrument);
   startPerformance();
 });
 $('stopSong').addEventListener('click', () => endPerformance());
 $('againSong').addEventListener('click', () => { $('resultSheet').hidden = true; startPerformance(); });
 $('closeResult').addEventListener('click', () => { $('resultSheet').hidden = true; endPerformance(); });
+$('midiPick').addEventListener('click', () => $('midiFile').click());
 $('octDown').addEventListener('click', () => shiftOctave(-1));
 $('octUp').addEventListener('click', () => shiftOctave(1));
 $('pedalBtn').addEventListener('click', (e) => { setPedal(!perf.pedal); e.currentTarget.blur(); });
@@ -1295,6 +1347,174 @@ function shiftOctave(d) {
   perf.octave = THREE.MathUtils.clamp(perf.octave + d, 2, 6);
   $('octLabel').textContent = `C${perf.octave}`;
 }
+
+// --- MIDI import: turn any .mid file into a chart ---
+// Reads note on/off events and the tempo map from a Standard MIDI File (format 0 or 1).
+function parseMidi(buf) {
+  const v = new DataView(buf);
+  let p = 0;
+  const str = (n) => { let s = ''; for (let i = 0; i < n; i++) s += String.fromCharCode(v.getUint8(p + i)); p += n; return s; };
+  const u32 = () => { const x = v.getUint32(p); p += 4; return x; };
+  const u16 = () => { const x = v.getUint16(p); p += 2; return x; };
+  const vlq = () => { let x = 0, b; do { b = v.getUint8(p++); x = (x << 7) | (b & 0x7f); } while (b & 0x80); return x; };
+  if (str(4) !== 'MThd') throw new Error('MIDI 파일이 아니야');
+  const hlen = u32();
+  u16(); // format
+  const ntracks = u16();
+  const division = u16();
+  p += hlen - 6;
+  if (division & 0x8000) throw new Error('SMPTE 타임코드 MIDI는 지원 안 해');
+
+  const tempos = [{ tick: 0, uspq: 500000 }];
+  const tracks = [];
+  for (let t = 0; t < ntracks && p < buf.byteLength; t++) {
+    const id = str(4);
+    const len = u32();
+    const end = p + len;
+    if (id !== 'MTrk') { p = end; continue; }
+    const track = { name: '', notes: [], channel: null };
+    const open = new Map();
+    let tick = 0, status = 0;
+    while (p < end) {
+      tick += vlq();
+      let b = v.getUint8(p);
+      if (b & 0x80) { status = b; p++; } // otherwise running status
+      const type = status & 0xf0, ch = status & 0x0f;
+      if (status === 0xff) {
+        const meta = v.getUint8(p++);
+        const mlen = vlq();
+        if (meta === 0x51) {
+          const uspq = (v.getUint8(p) << 16) | (v.getUint8(p + 1) << 8) | v.getUint8(p + 2);
+          const same = tempos.find((x) => x.tick === tick);
+          if (same) same.uspq = uspq; else tempos.push({ tick, uspq });
+        }
+        if (meta === 0x03) { const save = p; track.name = str(mlen); p = save; }
+        p += mlen;
+      } else if (status === 0xf0 || status === 0xf7) {
+        p += vlq();
+      } else if (type === 0x90 || type === 0x80) {
+        const note = v.getUint8(p), vel = v.getUint8(p + 1);
+        p += 2;
+        const key = ch * 128 + note;
+        if (type === 0x90 && vel > 0) {
+          if (!open.has(key)) open.set(key, []);
+          open.get(key).push({ tick, vel });
+        } else {
+          const start = open.get(key)?.shift();
+          if (start && ch !== 9) track.notes.push({ tick: start.tick, endTick: tick, midi: note, vel: start.vel, ch });
+        }
+      } else if (type === 0xc0 || type === 0xd0) {
+        p += 1;
+      } else {
+        p += 2;
+      }
+    }
+    p = end;
+    if (track.notes.length) tracks.push(track);
+  }
+
+  // ticks → seconds through the tempo map
+  tempos.sort((a, b) => a.tick - b.tick);
+  const segs = [];
+  let sec = 0;
+  for (let i = 0; i < tempos.length; i++) {
+    const { tick, uspq } = tempos[i];
+    if (i > 0) sec += ((tick - tempos[i - 1].tick) * tempos[i - 1].uspq) / 1e6 / division;
+    segs.push({ tick, sec, uspq });
+  }
+  const toSec = (tick) => {
+    let s = segs[0];
+    for (const seg of segs) { if (seg.tick <= tick) s = seg; else break; }
+    return s.sec + ((tick - s.tick) * s.uspq) / 1e6 / division;
+  };
+  for (const tr of tracks) {
+    for (const n of tr.notes) { n.t = toSec(n.tick); n.dur = Math.max(0.05, toSec(n.endTick) - n.t); }
+    tr.notes.sort((a, b) => a.t - b.t || b.midi - a.midi);
+    tr.drums = tr.notes.every((n) => n.ch === 9);
+    tr.avgPitch = tr.notes.reduce((s, n) => s + n.midi, 0) / tr.notes.length;
+  }
+  return { tracks: tracks.filter((tr) => !tr.drums), bpm: 60e6 / segs[0].uspq };
+}
+
+let midiSong = null; // { title, tracks, bpm, melody }
+
+// the melody is the highest-sounding track that has a reasonable number of notes
+function pickMelodyTrack(tracks) {
+  const candidates = tracks.filter((tr) => tr.notes.length >= 16);
+  return (candidates.length ? candidates : tracks).reduce((best, tr, i, arr) => (tr.avgPitch > arr[best].avgPitch ? i : best), 0);
+}
+
+const MIDI_LEVELS = {
+  easy: { label: '쉬움', fall: 1.8, gap: 0.42, chord: 1 },
+  normal: { label: '보통', fall: 1.35, gap: 0.2, chord: 1 },
+  hard: { label: '어려움', fall: 1.0, gap: 0.09, chord: 2 },
+};
+
+function buildMidiChart(song, levelKey) {
+  const level = MIDI_LEVELS[levelKey];
+  const spb = 60 / song.bpm;
+  const lead = COUNT_IN * spb;
+  const melody = song.tracks[song.melody];
+  const notes = [];
+  const accomp = [];
+  // keep the top note(s) of each onset, spaced out by the level's minimum gap; the rest is played for you
+  let lastT = -Infinity;
+  for (let i = 0; i < melody.notes.length;) {
+    const t = melody.notes[i].t;
+    const group = [];
+    while (i < melody.notes.length && melody.notes[i].t - t < 0.03) group.push(melody.notes[i++]);
+    group.sort((a, b) => b.midi - a.midi);
+    const take = [];
+    if (t - lastT >= level.gap) {
+      for (const n of group) {
+        if (take.length >= level.chord) break;
+        if (!take.some((x) => x.midi % 12 === n.midi % 12)) take.push(n);
+      }
+      lastT = t;
+    }
+    for (const n of group) {
+      if (take.includes(n)) notes.push({ t: lead + n.t, lane: n.midi % 12, midi: n.midi });
+      else accomp.push({ t: lead + n.t, midi: n.midi, vel: 0.35, dur: Math.min(n.dur, 3) });
+    }
+  }
+  song.tracks.forEach((tr, i) => {
+    if (i === song.melody) return;
+    for (const n of tr.notes) accomp.push({ t: lead + n.t, midi: n.midi, vel: 0.12 + (n.vel / 127) * 0.2, dur: Math.min(n.dur, 4) });
+  });
+  const last = Math.max(...song.tracks.flatMap((tr) => tr.notes.map((n) => n.t + n.dur)));
+  const clicks = Array.from({ length: COUNT_IN }, (_, i) => i * spb);
+  return { notes, accomp, clicks, spb, fall: level.fall, label: level.label, title: song.title, end: lead + last + 2 };
+}
+
+$('midiFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const parsed = parseMidi(await file.arrayBuffer());
+    if (!parsed.tracks.length) throw new Error('연주할 음표가 없어');
+    midiSong = { title: file.name.replace(/\.midi?$/i, ''), ...parsed };
+    midiSong.melody = pickMelodyTrack(midiSong.tracks);
+    const sel = $('midiTrack');
+    sel.innerHTML = '';
+    midiSong.tracks.forEach((tr, i) => {
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = `${tr.name || `트랙 ${i + 1}`} · 음표 ${tr.notes.length}개 · 평균 ${PC_NAMES[Math.round(tr.avgPitch) % 12]}${Math.floor(Math.round(tr.avgPitch) / 12) - 1}`;
+      sel.appendChild(opt);
+    });
+    sel.value = String(midiSong.melody);
+    $('midiTrackField').hidden = false;
+    $('midiInfo').textContent = `${midiSong.title} · 약 ${Math.round(midiSong.bpm)} BPM · 트랙 ${midiSong.tracks.length}개`;
+    document.querySelector('input[name="song"][value="midi"]').checked = true;
+  } catch (err) {
+    midiSong = null;
+    $('midiTrackField').hidden = true;
+    $('midiInfo').textContent = `불러오기 실패: ${err?.message || err}`;
+  }
+});
+$('midiTrack').addEventListener('change', (e) => { if (midiSong) midiSong.melody = Number(e.target.value); });
+$('instrumentSelect').addEventListener('change', (e) => { if (actx) loadInstrument(e.target.value); });
 
 function startPerformance() {
   ensureAudio();
@@ -1304,11 +1524,12 @@ function startPerformance() {
   });
   perf.t0 = actx.currentTime + 0.4;
   if (perf.mode === 'song') {
-    const chart = buildChart(SONGS[perf.song], perf.level);
+    const chart = perf.song === 'midi' ? buildMidiChart(midiSong, perf.level) : buildChart(SONGS[perf.song], perf.level);
     perf.chart = chart;
     chart.notes.forEach((n) => { n.done = null; });
     for (const c of chart.clicks) tone(1568, perf.t0 + c, 0.08, 0.08, 'square');
-    for (const a of chart.accomp) playNote(a.midi, perf.t0 + a.t, a.vel, a.dur);
+    chart.accomp.sort((a, b) => a.t - b.t);
+    perf.accompIdx = 0;
   } else {
     perf.chart = null;
   }
@@ -1363,7 +1584,7 @@ function showResult() {
 }
 
 function strike(midi, when, held = false) {
-  const voice = playNote(midi, when ?? actx.currentTime, 0.85, held ? null : 1.4);
+  const voice = playNote(midi, when ?? actx.currentTime, 0.85, held ? null : 1.4, perf.instrument);
   dipPianoKey(midi);
   // keys below F strike with the left hand, F and up with the right
   if (midi % 12 < 5) perf.handL = 1; else perf.handR = 1;
@@ -1594,7 +1815,7 @@ function drawRhythm(now) {
   ctx.fillStyle = 'rgba(255,255,255,0.85)';
   ctx.font = '14px "Gowun Dodum", sans-serif';
   if (perf.chart) {
-    ctx.fillText(`${SONGS[perf.song].title} · ${perf.chart.label}${perf.auto ? ' · 자동' : ''}`, 14, 20);
+    ctx.fillText(`${perf.chart.title} · ${perf.chart.label} · ${INSTRUMENTS[perf.instrument].label}${perf.auto ? ' · 자동' : ''}`, 14, 20);
     ctx.font = '600 18px "Jua", sans-serif';
     ctx.fillText(perf.score.toLocaleString(), 14, 42);
     const prog = THREE.MathUtils.clamp(now / perf.chart.end, 0, 1);
@@ -1666,6 +1887,12 @@ function stepPerformance(dt) {
   perf.now = now;
   const chart = perf.chart;
 
+  if (chart) {
+    while (perf.accompIdx < chart.accomp.length && chart.accomp[perf.accompIdx].t < now + 0.6) {
+      const a = chart.accomp[perf.accompIdx++];
+      if (a.t >= now - 0.05) playNote(a.midi, perf.t0 + Math.max(a.t, now), a.vel, a.dur);
+    }
+  }
   if (chart && !perf.finished) {
     for (const n of chart.notes) {
       if (n.done) continue;

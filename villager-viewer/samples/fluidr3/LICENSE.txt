@@ -1,0 +1,6 @@
+FluidR3 GM soundfont renders
+Source: https://github.com/gleitz/midi-js-soundfonts (FluidR3_GM folder)
+License: Creative Commons Attribution 3.0 (CC BY 3.0) - https://creativecommons.org/licenses/by/3.0/us/
+
+Instruments: music_box, celesta, vibraphone, marimba, kalimba, acoustic_guitar_nylon, violin, flute.
+Notes C2-C7 every minor third; Eb/Gb files were renamed to Ds/Fs to match samples/salamander.
