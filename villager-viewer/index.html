@@ -130,6 +130,58 @@
   .status.error { color: var(--error); }
   .note { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--muted); }
 
+
+  /* ---- performance mode: 3D stage on top, rhythm lanes below ---- */
+  body.playing #stage { height: 54%; }
+  body.playing .hint, body.playing .dock, body.playing .card { display: none !important; }
+  .rhythm {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    height: 46%;
+    background: #1b2130;
+    border-top: 3px solid #f4d36b;
+  }
+  .rhythm canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  .rhythm .stop {
+    position: absolute;
+    top: 10px; right: 12px;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.25);
+  }
+  .sheet {
+    position: fixed;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(380px, calc(100% - 32px));
+    max-height: calc(100% - 32px);
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 18px;
+    display: grid;
+    gap: 12px;
+    box-shadow: 0 16px 40px rgba(20, 40, 30, 0.3);
+  }
+  .sheet h2 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 22px; }
+  .sheet fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .sheet legend { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .choice {
+    display: flex; align-items: center; gap: 10px;
+    border: 1px solid var(--line); border-radius: 12px;
+    padding: 10px 12px; cursor: pointer;
+  }
+  .choice:has(input:checked) { border-color: var(--accent); }
+  .choice strong { font-family: var(--font-display); font-weight: 400; font-size: 16px; }
+  .choice small { display: block; color: var(--muted); font-size: 12px; }
+  .seg { display: flex; gap: 8px; flex-wrap: wrap; }
+  .seg .choice { flex: 1; justify-content: center; padding: 8px; }
+  .result-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; text-align: center; font-variant-numeric: tabular-nums; }
+  .result-grid div { border: 1px solid var(--line); border-radius: 10px; padding: 6px 2px; font-size: 12px; color: var(--muted); }
+  .result-grid b { display: block; font-size: 18px; color: var(--ink); font-family: var(--font-display); font-weight: 400; }
+  .rank { font-family: var(--font-display); font-size: 44px; line-height: 1; color: var(--accent); }
+  .big-num { font-family: var(--font-display); font-size: 28px; }
   .drop {
     position: fixed;
     inset: 12px;
@@ -148,7 +200,7 @@
 </style>
 
 <canvas id="stage" aria-label="3D 섬 화면"></canvas>
-<div class="hint" id="hint">WASD·방향키 이동 · 땅 탭으로 이동 · 휠 줌 · M 메뉴</div>
+<div class="hint" id="hint">WASD 이동 · 탭 이동 · 휠 줌 · M 메뉴 · P 연주</div>
 
 <section class="card" id="panel" aria-label="캐릭터 설정" hidden>
   <h1>섬 산책 놀이터</h1>
@@ -179,8 +231,55 @@
   <div class="row">
     <button class="btn primary" id="jumpBtn" type="button">점프 <kbd>Space</kbd></button>
     <button class="btn primary" id="waveBtn" type="button">손 흔들기 <kbd>E</kbd></button>
+    <button class="btn primary" id="playBtn" type="button">연주하기 <kbd>P</kbd></button>
   </div>
 </div>
+
+<section class="sheet" id="songSheet" role="dialog" aria-modal="true" aria-labelledby="songTitle" hidden>
+  <h2 id="songTitle">연주할 곡 고르기</h2>
+  <fieldset>
+    <legend>악보</legend>
+    <label class="choice"><input type="radio" name="song" value="canon" checked>
+      <span><strong>캐논 D장조 · 파헬벨</strong><small>♩=76 · 약 1분 · 변주 4개</small></span></label>
+  </fieldset>
+  <fieldset>
+    <legend>난이도</legend>
+    <div class="seg">
+      <label class="choice"><input type="radio" name="level" value="easy" checked> 쉬움</label>
+      <label class="choice"><input type="radio" name="level" value="normal"> 보통</label>
+    </div>
+  </fieldset>
+  <label class="choice"><input type="checkbox" id="autoPlay"> <span>자동 연주로 감상하기<small>노트를 대신 쳐줘</small></span></label>
+  <p class="note">떨어지는 노트가 노란 선에 닿을 때 D · F · J · K를 눌러. 모바일은 해당 칸을 터치하면 돼.</p>
+  <div class="row">
+    <button class="btn primary" id="startSong" type="button">연주 시작</button>
+    <button class="btn" id="cancelSong" type="button">닫기</button>
+  </div>
+</section>
+
+<div class="rhythm" id="rhythm" hidden>
+  <canvas id="rhythmCanvas" aria-label="리듬 게임 노트 레인"></canvas>
+  <button class="btn stop" id="stopSong" type="button">그만하기 <kbd>Esc</kbd></button>
+</div>
+
+<section class="sheet" id="resultSheet" role="dialog" aria-modal="true" aria-labelledby="resultTitle" hidden>
+  <h2 id="resultTitle">연주 끝!</h2>
+  <div class="row" style="justify-content: space-between">
+    <div><div class="note">정확도</div><div class="big-num" id="resAcc">0%</div></div>
+    <div class="rank" id="resRank">A</div>
+  </div>
+  <div class="result-grid">
+    <div><b id="resPerfect">0</b>Perfect</div>
+    <div><b id="resGreat">0</b>Great</div>
+    <div><b id="resGood">0</b>Good</div>
+    <div><b id="resMiss">0</b>Miss</div>
+  </div>
+  <p class="note" id="resCombo">최대 콤보 0</p>
+  <div class="row">
+    <button class="btn primary" id="againSong" type="button">다시 연주</button>
+    <button class="btn" id="closeResult" type="button">섬으로 돌아가기</button>
+  </div>
+</section>
 
 <div class="drop" id="drop" hidden>여기에 놓으면 캐릭터가 바뀌어</div>
 
@@ -681,6 +780,7 @@ const keys = new Set();
 const MOVE_KEYS = { KeyW: [0, -1], ArrowUp: [0, -1], KeyS: [0, 1], ArrowDown: [0, 1], KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0] };
 addEventListener('keydown', (e) => {
   if (e.target.closest && e.target.closest('select')) return;
+  if (perfKeydown(e)) return;
   if (MOVE_KEYS[e.code]) { keys.add(e.code); target = null; marker.visible = false; e.preventDefault(); }
   if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) jump(); }
   if (e.code === 'KeyE' && !e.repeat) wave();
@@ -705,7 +805,7 @@ function wave() {
 }
 $('jumpBtn').addEventListener('click', (e) => { jump(); e.currentTarget.blur(); });
 $('waveBtn').addEventListener('click', (e) => { wave(); e.currentTarget.blur(); });
-addEventListener('keyup', (e) => keys.delete(e.code));
+addEventListener('keyup', (e) => { keys.delete(e.code); perfKeyup(e); });
 addEventListener('blur', () => keys.clear());
 
 let target = null;
@@ -739,7 +839,7 @@ const camPos = new THREE.Vector3();
 const lookAt = new THREE.Vector3();
 
 function resize() {
-  const w = innerWidth, h = innerHeight;
+  const w = canvas.clientWidth || innerWidth, h = canvas.clientHeight || innerHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
@@ -748,6 +848,7 @@ addEventListener('resize', resize);
 resize();
 
 function step(dt) {
+  if (perf.active) { stepPerformance(dt); return; }
   const dir = new THREE.Vector3();
   for (const k of keys) { dir.x += MOVE_KEYS[k][0]; dir.z += MOVE_KEYS[k][1]; }
   if (target) {
@@ -866,6 +967,481 @@ async function loadBundled() {
   } catch {
     // no bundled model: keep the sample villager
   }
+}
+
+// ---------- performance mode: toy keyboard + falling-note rhythm game ----------
+const NOTE_INDEX = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+const midiOf = (n) => {
+  const m = n.match(/^([A-G])(#?)(\d)$/);
+  return 12 * (Number(m[3]) + 1) + NOTE_INDEX[m[1]] + (m[2] ? 1 : 0);
+};
+const freqOf = (midi) => 440 * Math.pow(2, (midi - 69) / 12);
+
+// Pachelbel's Canon in D over its 8-chord ground bass (2 beats per chord, 16 beats per cycle)
+const SONGS = {
+  canon: {
+    title: '캐논 D장조',
+    bpm: 76,
+    bass: ['D3', 'A2', 'B2', 'F#2', 'G2', 'D2', 'G2', 'A2'],
+    chords: [
+      ['F#4', 'A4', 'D5'], ['E4', 'A4', 'C#5'], ['F#4', 'B4', 'D5'], ['F#4', 'A4', 'C#5'],
+      ['G4', 'B4', 'D5'], ['F#4', 'A4', 'D5'], ['G4', 'B4', 'D5'], ['E4', 'A4', 'C#5'],
+    ],
+    cycles: [
+      { beat: 2, notes: 'F#5 E5 D5 C#5 B4 A4 B4 C#5' },
+      { beat: 1, notes: 'D5 F#5 A5 G5 F#5 D5 F#5 E5 D5 B4 D5 A5 G5 B5 A5 G5' },
+      { beat: 0.5, notes: 'D5 F#5 A5 F#5 C#5 E5 A5 E5 B4 D5 F#5 D5 A4 C#5 F#5 C#5 B4 D5 G5 D5 A4 D5 F#5 D5 B4 D5 G5 D5 C#5 E5 A5 E5' },
+      { beat: 2, notes: 'F#5 E5 D5 C#5 B4 A4 B4 C#5' },
+    ],
+    ending: 'D5',
+  },
+};
+
+const COUNT_IN = 4;          // beats of clicks before the music starts
+const WINDOW = { PERFECT: 0.06, GREAT: 0.11, GOOD: 0.16 };
+const POINTS = { PERFECT: 1000, GREAT: 700, GOOD: 400, MISS: 0 };
+const LANE_KEYS = ['KeyD', 'KeyF', 'KeyJ', 'KeyK'];
+const LANE_LABELS = ['D', 'F', 'J', 'K'];
+const LANE_COLORS = ['#ff8fb1', '#ffd45e', '#6fd3a0', '#71b9ff'];
+
+function buildChart(song, level) {
+  const spb = 60 / song.bpm;
+  const notes = [];
+  let beat = 0;
+  for (const cycle of song.cycles) {
+    for (const name of cycle.notes.split(' ')) {
+      // easy: drop the off-beat eighths so the fast variation becomes quarter notes
+      if (!(level === 'easy' && cycle.beat < 1 && beat % 1 !== 0)) {
+        notes.push({ t: (COUNT_IN + beat) * spb, midi: midiOf(name) });
+      }
+      beat += cycle.beat;
+    }
+  }
+  const musicBeats = beat;
+  notes.push({ t: (COUNT_IN + musicBeats) * spb, midi: midiOf(song.ending) });
+
+  const lo = Math.min(...notes.map((n) => n.midi));
+  const hi = Math.max(...notes.map((n) => n.midi));
+  for (const n of notes) n.lane = Math.min(3, Math.floor(((n.midi - lo) / (hi - lo + 1)) * 4));
+
+  const accomp = [];
+  for (let b = 0; b <= musicBeats; b += 2) {
+    const i = (b / 2) % 8;
+    const final = b === musicBeats;
+    const t = (COUNT_IN + b) * spb;
+    accomp.push({ t, midi: midiOf(final ? 'D2' : song.bass[i]), vel: 0.22, dur: final ? 3 : spb * 2.2 });
+    for (const c of final ? ['F#4', 'A4', 'D5'] : song.chords[i]) {
+      accomp.push({ t: t + 0.01, midi: midiOf(c), vel: 0.045, dur: final ? 3 : spb * 2 });
+    }
+  }
+  const clicks = Array.from({ length: COUNT_IN }, (_, i) => i * spb);
+  return { notes, accomp, clicks, spb, end: (COUNT_IN + musicBeats + 4) * spb };
+}
+
+// --- sound ---
+let actx = null;
+let master = null;
+function tone(freq, when, vel = 0.2, dur = 1.2, type = 'triangle') {
+  const o = actx.createOscillator();
+  const o2 = actx.createOscillator();
+  const g = actx.createGain();
+  const g2 = actx.createGain();
+  o.type = type; o.frequency.value = freq;
+  o2.type = 'sine'; o2.frequency.value = freq * 2;
+  g2.gain.value = 0.25;
+  o.connect(g); o2.connect(g2); g2.connect(g); g.connect(master);
+  g.gain.setValueAtTime(0.0001, when);
+  g.gain.linearRampToValueAtTime(vel, when + 0.006);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+  o.start(when); o2.start(when);
+  o.stop(when + dur + 0.05); o2.stop(when + dur + 0.05);
+}
+
+// --- the instrument: a little keyboard on a stand ---
+const piano = new THREE.Group();
+const pianoKeys = [];
+{
+  const wood = new THREE.MeshLambertMaterial({ color: 0xc0573e });
+  const dark = new THREE.MeshLambertMaterial({ color: 0x3a2a24 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.12, 0.34), wood);
+  body.position.y = 0.5;
+  const legGeo = new THREE.CylinderGeometry(0.025, 0.025, 0.46, 8);
+  for (const x of [-0.5, 0.5]) for (const z of [-0.12, 0.12]) {
+    const leg = new THREE.Mesh(legGeo, dark);
+    leg.position.set(x, 0.23, z);
+    piano.add(leg);
+  }
+  piano.add(body);
+  const whiteGeo = new THREE.BoxGeometry(0.075, 0.035, 0.2);
+  const whiteMat = new THREE.MeshLambertMaterial({ color: 0xfbf8f0 });
+  const blackGeo = new THREE.BoxGeometry(0.045, 0.04, 0.12);
+  for (let i = 0; i < 14; i++) {
+    const k = new THREE.Mesh(whiteGeo, whiteMat);
+    k.position.set(-0.49 + i * 0.0755, 0.575, -0.04);
+    k.userData.rest = k.position.y;
+    piano.add(k);
+    pianoKeys.push(k);
+    if (![2, 6, 9, 13].includes(i)) {
+      const b = new THREE.Mesh(blackGeo, dark);
+      b.position.set(k.position.x + 0.038, 0.6, -0.08);
+      piano.add(b);
+    }
+  }
+  piano.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  piano.visible = false;
+  scene.add(piano);
+}
+
+// --- state ---
+const perf = {
+  active: false, song: 'canon', level: 'easy', auto: false,
+  chart: null, t0: 0, now: 0,
+  combo: 0, maxCombo: 0, score: 0,
+  counts: { PERFECT: 0, GREAT: 0, GOOD: 0, MISS: 0 },
+  judge: null, lanePress: [0, 0, 0, 0], laneHeld: [false, false, false, false],
+  handL: 0, handR: 0, keyDip: new Array(14).fill(0), finished: false,
+};
+const rhythmEl = $('rhythm');
+const rc = $('rhythmCanvas');
+const rctx = rc.getContext('2d');
+
+function sizeRhythm() {
+  const dpr = Math.min(devicePixelRatio, 2);
+  rc.width = Math.round(rc.clientWidth * dpr);
+  rc.height = Math.round(rc.clientHeight * dpr);
+  rctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+addEventListener('resize', () => { if (perf.active) sizeRhythm(); });
+
+function openSongSheet() {
+  if (perf.active) return;
+  keys.clear(); target = null; marker.visible = false;
+  $('songSheet').hidden = false;
+  $('startSong').focus();
+}
+$('playBtn').addEventListener('click', openSongSheet);
+$('cancelSong').addEventListener('click', () => { $('songSheet').hidden = true; });
+$('startSong').addEventListener('click', () => {
+  perf.song = document.querySelector('input[name="song"]:checked').value;
+  perf.level = document.querySelector('input[name="level"]:checked').value;
+  perf.auto = $('autoPlay').checked;
+  $('songSheet').hidden = true;
+  startPerformance();
+});
+$('stopSong').addEventListener('click', () => endPerformance());
+$('againSong').addEventListener('click', () => { $('resultSheet').hidden = true; startPerformance(); });
+$('closeResult').addEventListener('click', () => { $('resultSheet').hidden = true; endPerformance(); });
+
+function startPerformance() {
+  actx ||= new (window.AudioContext || window.webkitAudioContext)();
+  actx.resume();
+  if (master) master.disconnect();
+  master = actx.createGain();
+  master.gain.value = 0.7;
+  master.connect(actx.destination);
+
+  const chart = buildChart(SONGS[perf.song], perf.level);
+  Object.assign(perf, {
+    active: true, chart, combo: 0, maxCombo: 0, score: 0, judge: null, finished: false,
+    counts: { PERFECT: 0, GREAT: 0, GOOD: 0, MISS: 0 },
+  });
+  chart.notes.forEach((n) => { n.done = null; });
+  perf.t0 = actx.currentTime + 0.4;
+  for (const c of chart.clicks) tone(1568, perf.t0 + c, 0.08, 0.08, 'square');
+  for (const a of chart.accomp) tone(freqOf(a.midi), perf.t0 + a.t, a.vel, a.dur);
+
+  // face the camera and set the keyboard in front of the character
+  player.rotation.y = 0;
+  piano.position.set(player.position.x, 0, player.position.z + 0.62);
+  piano.visible = true;
+  keys.clear(); target = null; marker.visible = false;
+  setPanel(false);
+  document.body.classList.add('playing');
+  rhythmEl.hidden = false;
+  resize();
+  sizeRhythm();
+}
+
+function endPerformance() {
+  if (master) {
+    const m = master;
+    m.gain.setTargetAtTime(0, actx.currentTime, 0.05);
+    setTimeout(() => m.disconnect(), 400);
+    master = null;
+  }
+  perf.active = false;
+  piano.visible = false;
+  rhythmEl.hidden = true;
+  $('resultSheet').hidden = true;
+  document.body.classList.remove('playing');
+  resize();
+}
+
+function showResult() {
+  perf.finished = true;
+  const c = perf.counts;
+  const total = perf.chart.notes.length;
+  const acc = total ? (c.PERFECT + c.GREAT * 0.7 + c.GOOD * 0.4) / total : 0;
+  const rank = acc >= 0.95 ? 'S' : acc >= 0.85 ? 'A' : acc >= 0.7 ? 'B' : acc >= 0.5 ? 'C' : 'D';
+  $('resAcc').textContent = `${(acc * 100).toFixed(1)}%`;
+  $('resRank').textContent = rank;
+  $('resPerfect').textContent = c.PERFECT;
+  $('resGreat').textContent = c.GREAT;
+  $('resGood').textContent = c.GOOD;
+  $('resMiss').textContent = c.MISS;
+  $('resCombo').textContent = `최대 콤보 ${perf.maxCombo} · 점수 ${perf.score.toLocaleString()}${perf.auto ? ' · 자동 연주' : ''}`;
+  $('resultSheet').hidden = false;
+}
+
+function judge(n, grade, when) {
+  n.done = grade;
+  perf.counts[grade]++;
+  perf.score += POINTS[grade];
+  if (grade === 'MISS') {
+    perf.combo = 0;
+  } else {
+    perf.combo++;
+    perf.maxCombo = Math.max(perf.maxCombo, perf.combo);
+    tone(freqOf(n.midi), when ?? actx.currentTime, 0.22, 1.3);
+    // left two lanes strike with the left hand, right two with the right
+    if (n.lane < 2) perf.handL = 1; else perf.handR = 1;
+    const key = Math.round(((n.midi - 69) / 14) * 13);
+    perf.keyDip[THREE.MathUtils.clamp(key, 0, 13)] = 1;
+  }
+  perf.judge = { grade, at: perf.now };
+}
+
+function pressLane(lane) {
+  perf.lanePress[lane] = 1;
+  if (perf.auto || perf.finished) return;
+  const now = actx.currentTime - perf.t0;
+  let best = null;
+  for (const n of perf.chart.notes) {
+    if (n.done || n.lane !== lane) continue;
+    const d = Math.abs(n.t - now);
+    if (d <= WINDOW.GOOD && (!best || d < Math.abs(best.t - now))) best = n;
+    if (n.t - now > WINDOW.GOOD) break;
+  }
+  if (!best) return;
+  const d = Math.abs(best.t - now);
+  judge(best, d <= WINDOW.PERFECT ? 'PERFECT' : d <= WINDOW.GREAT ? 'GREAT' : 'GOOD');
+}
+
+function perfKeydown(e) {
+  if (!$('songSheet').hidden) {
+    if (e.code === 'Escape') $('songSheet').hidden = true;
+    return true; // no walking or jumping behind the dialog
+  }
+  if (!perf.active) {
+    if (e.code === 'KeyP' && !e.repeat && $('songSheet').hidden) { openSongSheet(); return true; }
+    return false;
+  }
+  e.preventDefault();
+  if (e.code === 'Escape') { endPerformance(); return true; }
+  const lane = LANE_KEYS.indexOf(e.code);
+  if (lane >= 0 && !e.repeat) { perf.laneHeld[lane] = true; pressLane(lane); }
+  return true;
+}
+function perfKeyup(e) {
+  const lane = LANE_KEYS.indexOf(e.code);
+  if (lane >= 0) perf.laneHeld[lane] = false;
+}
+
+function laneGeometry() {
+  const w = rc.clientWidth, h = rc.clientHeight;
+  const laneW = Math.min(110, (w - 32) / 4);
+  const left = (w - laneW * 4) / 2;
+  return { w, h, laneW, left, hitY: h - 64 };
+}
+rc.addEventListener('pointerdown', (e) => {
+  if (!perf.active) return;
+  const r = rc.getBoundingClientRect();
+  const { laneW, left } = laneGeometry();
+  const lane = Math.floor((e.clientX - r.left - left) / laneW);
+  if (lane < 0 || lane > 3) return;
+  e.preventDefault();
+  rc.setPointerCapture?.(e.pointerId);
+  perf.laneHeld[lane] = true;
+  e.target.dataset[`p${e.pointerId}`] = lane;
+  pressLane(lane);
+});
+const releasePointer = (e) => {
+  const lane = e.target.dataset?.[`p${e.pointerId}`];
+  if (lane !== undefined) { perf.laneHeld[Number(lane)] = false; delete e.target.dataset[`p${e.pointerId}`]; }
+};
+rc.addEventListener('pointerup', releasePointer);
+rc.addEventListener('pointercancel', releasePointer);
+
+function drawRhythm(now, fall) {
+  const { w, h, laneW, left, hitY } = laneGeometry();
+  const ctx = rctx;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#1b2130';
+  ctx.fillRect(0, 0, w, h);
+
+  for (let i = 0; i < 4; i++) {
+    const x = left + i * laneW;
+    const glow = Math.max(perf.lanePress[i], perf.laneHeld[i] ? 0.6 : 0);
+    const grad = ctx.createLinearGradient(0, 0, 0, hitY);
+    grad.addColorStop(0, 'rgba(255,255,255,0.02)');
+    grad.addColorStop(1, `rgba(255,255,255,${0.05 + glow * 0.18})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(x + 2, 0, laneW - 4, hitY);
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.fillRect(x, 0, 1, h);
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.fillRect(left + laneW * 4, 0, 1, h);
+
+  // falling notes
+  const span = hitY + 20;
+  for (const n of perf.chart.notes) {
+    if (n.done && n.done !== 'MISS') continue;
+    const dt = n.t - now;
+    if (dt > fall) break;
+    if (dt < -0.3) continue;
+    const y = hitY - (dt / fall) * span;
+    const x = left + n.lane * laneW;
+    ctx.globalAlpha = n.done === 'MISS' ? 0.25 : 1;
+    ctx.fillStyle = LANE_COLORS[n.lane];
+    roundRect(ctx, x + 6, y - 9, laneW - 12, 18, 7);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    roundRect(ctx, x + 10, y - 7, laneW - 20, 5, 3);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // hit line and key caps
+  ctx.fillStyle = '#f4d36b';
+  ctx.fillRect(left, hitY - 2, laneW * 4, 4);
+  ctx.font = '600 16px "Jua", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i < 4; i++) {
+    const x = left + i * laneW;
+    const on = perf.lanePress[i] > 0.05 || perf.laneHeld[i];
+    ctx.fillStyle = on ? LANE_COLORS[i] : 'rgba(255,255,255,0.1)';
+    roundRect(ctx, x + 6, hitY + 12, laneW - 12, 40, 10);
+    ctx.fill();
+    ctx.fillStyle = on ? '#1b2130' : 'rgba(255,255,255,0.75)';
+    ctx.fillText(LANE_LABELS[i], x + laneW / 2, hitY + 32);
+  }
+
+  // HUD
+  ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.font = '15px "Gowun Dodum", sans-serif';
+  ctx.fillText(`${SONGS[perf.song].title} · ${perf.level === 'easy' ? '쉬움' : '보통'}${perf.auto ? ' · 자동' : ''}`, 14, 22);
+  ctx.font = '600 18px "Jua", sans-serif';
+  ctx.fillText(perf.score.toLocaleString(), 14, 46);
+  const prog = THREE.MathUtils.clamp(now / perf.chart.end, 0, 1);
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.fillRect(0, 0, w, 3);
+  ctx.fillStyle = '#f4d36b';
+  ctx.fillRect(0, 0, w * prog, 3);
+
+  if (now < 0 || now < COUNT_IN * perf.chart.spb) {
+    const left4 = Math.ceil(COUNT_IN - now / perf.chart.spb);
+    ctx.textAlign = 'center';
+    ctx.font = '600 44px "Jua", sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.fillText(String(THREE.MathUtils.clamp(left4, 1, COUNT_IN)), w / 2, hitY * 0.45);
+  }
+  if (perf.combo >= 2) {
+    ctx.textAlign = 'center';
+    ctx.font = '600 36px "Jua", sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.fillText(String(perf.combo), w / 2, hitY * 0.32);
+    ctx.font = '13px "Gowun Dodum", sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillText('COMBO', w / 2, hitY * 0.32 + 26);
+  }
+  if (perf.judge && now - perf.judge.at < 0.5) {
+    const a = 1 - (now - perf.judge.at) / 0.5;
+    const colors = { PERFECT: '#ffd45e', GREAT: '#6fd3a0', GOOD: '#71b9ff', MISS: '#ff7a7a' };
+    ctx.globalAlpha = a;
+    ctx.textAlign = 'center';
+    ctx.font = `600 ${26 + (1 - a) * 6}px "Jua", sans-serif`;
+    ctx.fillStyle = colors[perf.judge.grade];
+    ctx.fillText(perf.judge.grade, w / 2, hitY * 0.62);
+    ctx.globalAlpha = 1;
+  }
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function stepPerformance(dt) {
+  const now = actx.currentTime - perf.t0;
+  perf.now = now;
+  const chart = perf.chart;
+  const fall = perf.level === 'easy' ? 1.9 : 1.5;
+
+  if (!perf.finished) {
+    for (const n of chart.notes) {
+      if (n.done) continue;
+      if (n.t - now > 0.05) break;
+      if (perf.auto) { judge(n, 'PERFECT', perf.t0 + n.t); perf.lanePress[n.lane] = 1; continue; }
+      if (now - n.t > WINDOW.GOOD) judge(n, 'MISS');
+    }
+    if (now > chart.end) showResult();
+  }
+
+  // decay hand/key/lane flashes
+  const k = Math.min(1, dt * 9);
+  perf.handL -= perf.handL * k;
+  perf.handR -= perf.handR * k;
+  for (let i = 0; i < 4; i++) perf.lanePress[i] -= perf.lanePress[i] * k;
+  pianoKeys.forEach((key, i) => {
+    perf.keyDip[i] -= perf.keyDip[i] * k;
+    key.position.y = key.userData.rest - perf.keyDip[i] * 0.02;
+  });
+
+  // playing pose: both hands forward over the keys, striking on hits, head bobbing to the beat
+  const beatT = Math.max(0, now) / chart.spb;
+  const bob = reduceMotion ? 0 : Math.sin(beatT * Math.PI) * 0.06;
+  player.rotation.y += (0 - player.rotation.y) * Math.min(1, dt * 10);
+  player.position.y = 0;
+  if (sample) {
+    sample.legL.rotation.x = sample.legR.rotation.x = 0;
+    sample.armL.rotation.x = -(1.25 - perf.handL * 0.4);
+    sample.armR.rotation.x = -(1.25 - perf.handR * 0.4);
+    sample.armL.rotation.z = 0.12;
+    sample.armR.rotation.z = -0.12;
+    sample.head.rotation.z = bob;
+    sample.root.position.y = Math.abs(bob) * 0.2;
+  } else if (rig) {
+    const ARM_DOWN = 1.25;
+    turnBone(rig.legL, AXIS_X, 0);
+    turnBone(rig.legR, AXIS_X, 0);
+    turnBone(rig.armL, AXIS_X, -(1.2 - perf.handL * 0.45), AXIS_Z, -ARM_DOWN);
+    turnBone(rig.armR, AXIS_X, -(1.2 - perf.handR * 0.45), AXIS_Z, ARM_DOWN);
+    turnBone(rig.spine, AXIS_Y, reduceMotion ? 0 : Math.sin(beatT * Math.PI * 0.5) * 0.06);
+    turnBone(rig.head, AXIS_Z, bob);
+    turnBone(rig.tail, AXIS_Y, reduceMotion ? 0 : Math.sin(beatT * Math.PI) * 0.3);
+    avatar.position.y = 0;
+  } else if (mixer) {
+    play(idleAction);
+    mixer.update(dt);
+  }
+
+  // three-quarter view from the front-left (the open side of the face) so the hands on the keys stay visible past the big head
+  camPos.set(player.position.x - 1.7, 1.45, player.position.z + 2.6);
+  camera.position.lerp(camPos, Math.min(1, dt * 4));
+  lookAt.set(player.position.x, 0.75, player.position.z + 0.35);
+  camera.lookAt(lookAt);
+  sun.position.set(player.position.x + 8, 14, player.position.z + 6);
+  sun.target.position.copy(player.position);
+
+  drawRhythm(now, fall);
 }
 
 useSample();
