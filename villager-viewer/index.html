@@ -97,6 +97,7 @@
     cursor: pointer;
   }
   .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+  .btn kbd { font-family: var(--font-body); font-size: 11px; opacity: 0.75; margin-left: 4px; }
   .btn:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   label.field { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
   select {
@@ -143,6 +144,10 @@
       <option value="auto">자동 (멈추면 대기, 움직이면 걷기)</option>
     </select>
   </label>
+  <div class="row">
+    <button class="btn primary" id="jumpBtn" type="button">점프 <kbd>Space</kbd></button>
+    <button class="btn primary" id="waveBtn" type="button">손 흔들기 <kbd>E</kbd></button>
+  </div>
   <label class="field" for="outfitSelect" id="outfitField" hidden>옷
     <select id="outfitSelect"></select>
   </label>
@@ -344,10 +349,13 @@ function setupRig(obj, frame) {
 }
 
 const _dq = new THREE.Quaternion();
-// rotate bones by `angle` around an axis given in the character frame
-function turnBone(entries, axis, angle) {
+const _tq = new THREE.Quaternion();
+// rotate bones from their bind pose by (axis, angle) pairs given in the character frame;
+// the last pair is applied first
+function turnBone(entries, ...rot) {
   if (!entries) return;
-  _dq.setFromAxisAngle(axis, angle);
+  _dq.identity();
+  for (let i = 0; i < rot.length; i += 2) _dq.multiply(_tq.setFromAxisAngle(rot[i], rot[i + 1]));
   for (const e of entries) {
     e.bone.quaternion.copy(e.parentInv).multiply(_dq).multiply(e.parentQ).multiply(e.base);
   }
@@ -626,7 +634,28 @@ const MOVE_KEYS = { KeyW: [0, -1], ArrowUp: [0, -1], KeyS: [0, 1], ArrowDown: [0
 addEventListener('keydown', (e) => {
   if (e.target.closest && e.target.closest('select')) return;
   if (MOVE_KEYS[e.code]) { keys.add(e.code); target = null; marker.visible = false; e.preventDefault(); }
+  if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) jump(); }
+  if (e.code === 'KeyE' && !e.repeat) wave();
 });
+
+// ---------- actions ----------
+const GRAVITY = 20;
+const WAVE_TIME = 1.8;
+let jumpY = 0, vy = 0, airborne = false;
+let waveT = 0;
+
+function jump() {
+  if (airborne) return;
+  airborne = true;
+  vy = 6.2;
+}
+function wave() {
+  waveT = WAVE_TIME;
+  const clip = actions.find((a) => /wave|greet|hello/i.test(a.name));
+  if (clip) { animSelect.value = clip.name; play(clip.action); }
+}
+$('jumpBtn').addEventListener('click', (e) => { jump(); e.currentTarget.blur(); });
+$('waveBtn').addEventListener('click', (e) => { wave(); e.currentTarget.blur(); });
 addEventListener('keyup', (e) => keys.delete(e.code));
 addEventListener('blur', () => keys.clear());
 
@@ -696,6 +725,18 @@ function step(dt) {
     phase += dt * 2;
   }
 
+  if (airborne) {
+    vy -= GRAVITY * dt;
+    jumpY += vy * dt;
+    if (jumpY <= 0) { jumpY = 0; vy = 0; airborne = false; }
+  }
+  player.position.y = jumpY;
+  waveT = Math.max(0, waveT - dt);
+  // 0→1→0 envelope so the arm eases up and back down
+  const waveK = waveT > 0 ? Math.min(1, (WAVE_TIME - waveT) * 5, waveT * 5) : 0;
+  const waveSwing = Math.sin((WAVE_TIME - waveT) * 13) * 0.35;
+  const air = airborne ? 1 : 0;
+
   // animation
   if (mixer) {
     if (animSelect.value === 'auto') play(moving ? walkAction : idleAction);
@@ -709,26 +750,48 @@ function step(dt) {
     const bob = moving ? Math.abs(Math.sin(phase)) * 0.06 : (reduceMotion ? 0 : Math.sin(phase) * 0.015);
     sample.root.position.y = bob;
     sample.head.rotation.z = moving ? Math.sin(phase) * 0.06 : 0;
+    if (air) {
+      sample.legL.rotation.x = sample.legR.rotation.x = -0.5;
+      sample.armL.rotation.z = 0.25 + 1.2; sample.armR.rotation.z = -0.25 - 1.2;
+    } else {
+      sample.armL.rotation.z = 0.25; sample.armR.rotation.z = -0.25;
+    }
+    if (waveK) {
+      // right hand on screen-left of the villager: lift the +x arm overhead and swing it
+      sample.armR.rotation.x = 0;
+      sample.armR.rotation.z = -0.25 + waveK * (2.7 + waveSwing);
+      sample.head.rotation.z = waveK * 0.12;
+    }
   } else if (rig) {
     const s = Math.sin(phase);
-    const k = moving ? 1 : 0;
-    turnBone(rig.legL, AXIS_X, s * 0.55 * k);
-    turnBone(rig.legR, AXIS_X, -s * 0.55 * k);
-    turnBone(rig.armL, AXIS_X, -s * 0.5 * k);
-    turnBone(rig.armR, AXIS_X, s * 0.5 * k);
+    const k = moving && !air ? 1 : 0;
+    turnBone(rig.legL, AXIS_X, air ? -0.6 : s * 0.55 * k);
+    turnBone(rig.legR, AXIS_X, air ? -0.35 : -s * 0.55 * k);
+    // bind pose is a T-pose (left arm along +X, right along -X): lower both to the sides,
+    // raise them a little while airborne, and swing them around X while walking
+    const ARM_DOWN = 1.25;
+    turnBone(rig.armL, AXIS_X, -s * 0.5 * k, AXIS_Z, air ? 0.5 : -ARM_DOWN);
+    if (waveK) {
+      const down = ARM_DOWN * (1 - waveK);
+      const up = waveK * (0.45 + waveSwing); // big head: keep the hand low enough to peek out beside it
+      turnBone(rig.armR, AXIS_Z, down - up);
+    } else {
+      turnBone(rig.armR, AXIS_X, s * 0.5 * k, AXIS_Z, air ? -0.5 : ARM_DOWN);
+    }
     turnBone(rig.spine, AXIS_Y, s * 0.08 * k);
-    turnBone(rig.head, AXIS_Z, moving ? s * 0.06 : (reduceMotion ? 0 : Math.sin(phase * 0.7) * 0.04));
+    turnBone(rig.head, AXIS_Z, waveK ? waveK * -0.15 : moving ? s * 0.06 : (reduceMotion ? 0 : Math.sin(phase * 0.7) * 0.04));
     turnBone(rig.tail, AXIS_Y, reduceMotion ? 0 : Math.sin(phase * (moving ? 1 : 1.6)) * 0.35);
-    avatar.position.y = moving ? Math.abs(s) * 0.05 : 0;
+    avatar.position.y = moving && !air ? Math.abs(s) * 0.05 : 0;
   } else if (avatar) {
-    avatar.position.y = moving ? Math.abs(Math.sin(phase)) * 0.08 : 0;
-    avatar.rotation.z = moving ? Math.sin(phase) * 0.07 : 0;
+    avatar.position.y = moving && !air ? Math.abs(Math.sin(phase)) * 0.08 : 0;
+    avatar.rotation.z = waveK ? waveSwing * 0.3 : moving ? Math.sin(phase) * 0.07 : 0;
   }
 
   if (marker.visible && !reduceMotion) marker.scale.setScalar(1 + Math.sin(clock.elapsedTime * 6) * 0.1);
 
-  // camera: high, fixed angle like a top-down island view
-  camPos.set(player.position.x, camDist * 0.72, player.position.z + camDist * 0.78);
+  // camera: high angle when far, lower and more frontal as you zoom in
+  const zoomT = (camDist - 5) / 15;
+  camPos.set(player.position.x, 0.8 + camDist * (0.2 + 0.52 * zoomT), player.position.z + camDist * 0.85);
   camera.position.lerp(camPos, Math.min(1, dt * 5));
   lookAt.set(player.position.x, 0.8, player.position.z);
   camera.lookAt(lookAt);
@@ -737,7 +800,27 @@ function step(dt) {
   sun.target.position.copy(player.position);
 }
 
+// A copy published with model/manifest.json next to the page opens that model on start.
+async function loadBundled() {
+  try {
+    const res = await fetch('model/manifest.json', { cache: 'no-store' });
+    if (!res.ok) return;
+    const { files } = await res.json();
+    // entries are "file.png" or { path: "model.xml", name: "model.dae" } when the host renames an extension
+    const loaded = await Promise.all(files.map(async (entry) => {
+      const { path, name } = typeof entry === 'string' ? { path: entry, name: entry } : entry;
+      const r = await fetch(`model/${encodeURIComponent(path)}`);
+      if (!r.ok) throw new Error(path);
+      return new File([await r.blob()], name);
+    }));
+    await loadFiles(loaded);
+  } catch {
+    // no bundled model: keep the sample villager
+  }
+}
+
 useSample();
+loadBundled();
 camera.position.set(0, camDist * 0.72, camDist * 0.78);
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05);
