@@ -65,10 +65,27 @@
     text-overflow: ellipsis;
   }
 
+  .dock {
+    position: fixed;
+    left: 16px;
+    right: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none;
+  }
+  .dock > * { pointer-events: auto; }
+  .dock .btn { background: var(--panel); box-shadow: 0 4px 14px rgba(30, 60, 40, 0.18); }
+  .dock .btn.primary { background: var(--accent); }
+  .dock .btn[aria-expanded="true"] { border-color: var(--accent); }
   .card {
     position: fixed;
     left: 16px;
-    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+    max-height: calc(100% - 140px);
+    overflow-y: auto;
     width: min(340px, calc(100% - 32px));
     background: var(--panel);
     border: 1px solid var(--line);
@@ -97,6 +114,7 @@
     cursor: pointer;
   }
   .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+  .btn kbd { font-family: var(--font-body); font-size: 11px; opacity: 0.75; margin-left: 4px; }
   .btn:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   label.field { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
   select {
@@ -112,6 +130,72 @@
   .status.error { color: var(--error); }
   .note { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--muted); }
 
+
+  /* ---- performance mode: 3D stage on top, rhythm lanes below ---- */
+  body.playing #stage { height: 54%; }
+  body.playing .hint, body.playing .dock, body.playing .card { display: none !important; }
+  .rhythm {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    height: 46%;
+    background: #1b2130;
+    border-top: 3px solid #f4d36b;
+  }
+  .rhythm canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  .rhythm .stop {
+    position: absolute;
+    top: 10px; right: 12px;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.25);
+  }
+  .octave {
+    position: absolute;
+    top: 10px; left: 12px;
+    display: flex; align-items: center; gap: 8px;
+    color: #fff;
+    font-family: var(--font-display);
+  }
+  .octave .btn { background: rgba(255, 255, 255, 0.12); color: #fff; border-color: rgba(255, 255, 255, 0.25); padding: 5px 10px; }
+  /* short landscape phones: give the keyboard more room */
+  @media (max-height: 520px) {
+    body.playing #stage { height: 40%; }
+    .rhythm { height: 60%; }
+  }
+  .sheet fieldset:disabled { opacity: 0.45; }
+  .sheet {
+    position: fixed;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(380px, calc(100% - 32px));
+    max-height: calc(100% - 32px);
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 18px;
+    display: grid;
+    gap: 12px;
+    box-shadow: 0 16px 40px rgba(20, 40, 30, 0.3);
+  }
+  .sheet h2 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 22px; }
+  .sheet fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .sheet legend { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .choice {
+    display: flex; align-items: center; gap: 10px;
+    border: 1px solid var(--line); border-radius: 12px;
+    padding: 10px 12px; cursor: pointer;
+  }
+  .choice:has(input:checked) { border-color: var(--accent); }
+  .choice strong { font-family: var(--font-display); font-weight: 400; font-size: 16px; }
+  .choice small { display: block; color: var(--muted); font-size: 12px; }
+  .seg { display: flex; gap: 8px; flex-wrap: wrap; }
+  .seg .choice { flex: 1; justify-content: center; padding: 8px; }
+  .result-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; text-align: center; font-variant-numeric: tabular-nums; }
+  .result-grid div { border: 1px solid var(--line); border-radius: 10px; padding: 6px 2px; font-size: 12px; color: var(--muted); }
+  .result-grid b { display: block; font-size: 18px; color: var(--ink); font-family: var(--font-display); font-weight: 400; }
+  .rank { font-family: var(--font-display); font-size: 44px; line-height: 1; color: var(--accent); }
+  .big-num { font-family: var(--font-display); font-size: 28px; }
   .drop {
     position: fixed;
     inset: 12px;
@@ -126,12 +210,13 @@
     pointer-events: none;
   }
   input[type="file"] { display: none; }
+  [hidden] { display: none !important; }
 </style>
 
 <canvas id="stage" aria-label="3D 섬 화면"></canvas>
-<div class="hint" id="hint">WASD·방향키로 이동 · 땅을 탭하면 그 자리로 · 휠로 줌</div>
+<div class="hint" id="hint">WASD 이동 · 탭 이동 · 휠 줌 · M 메뉴 · P 연주</div>
 
-<section class="card" aria-label="캐릭터 설정">
+<section class="card" id="panel" aria-label="캐릭터 설정" hidden>
   <h1>섬 산책 놀이터</h1>
   <div class="row">
     <button class="btn primary" id="openFiles" type="button">모델 파일 열기</button>
@@ -142,18 +227,112 @@
       <option value="auto">자동 (멈추면 대기, 움직이면 걷기)</option>
     </select>
   </label>
+  <label class="field" for="outfitSelect" id="outfitField" hidden>옷
+    <select id="outfitSelect"></select>
+  </label>
   <div class="row">
     <button class="btn" id="flip" type="button">방향 180° 돌리기</button>
     <button class="btn" id="reset" type="button">샘플로 되돌리기</button>
   </div>
-  <p class="status" id="status" role="status">샘플 주민으로 시작했어. 받은 .dae / .fbx / .glb 파일을 텍스처 이미지랑 같이 열거나 화면에 끌어다 놓으면 바뀌어.</p>
+  <p class="status" id="status" role="status">샘플 주민으로 시작했어. 받은 zip을 그대로 열거나 화면에 끌어다 놓으면 바뀌어.</p>
   <p class="note">파일은 이 브라우저 안에서만 읽어. 어디에도 업로드하지 않아.</p>
-  <input type="file" id="fileInput" multiple accept=".dae,.fbx,.glb,.gltf,.bin,.png,.jpg,.jpeg,.tga,.webp,.bmp">
+  <input type="file" id="fileInput" multiple accept=".zip,.dae,.fbx,.glb,.gltf,.bin,.png,.jpg,.jpeg,.tga,.webp,.bmp">
   <input type="file" id="folderInput" webkitdirectory multiple>
+</section>
+
+<div class="dock">
+  <button class="btn" id="menuBtn" type="button" aria-controls="panel" aria-expanded="false">메뉴 열기</button>
+  <div class="row">
+    <button class="btn primary" id="jumpBtn" type="button">점프 <kbd>Space</kbd></button>
+    <button class="btn primary" id="waveBtn" type="button">손 흔들기 <kbd>E</kbd></button>
+    <button class="btn primary" id="playBtn" type="button">연주하기 <kbd>P</kbd></button>
+  </div>
+</div>
+
+<section class="sheet" id="songSheet" role="dialog" aria-modal="true" aria-labelledby="songTitle" hidden>
+  <h2 id="songTitle">연주하기</h2>
+  <fieldset>
+    <legend>모드</legend>
+    <div class="seg">
+      <label class="choice"><input type="radio" name="mode" value="song" checked> 악보 연주</label>
+      <label class="choice"><input type="radio" name="mode" value="free"> 연습 모드</label>
+    </div>
+  </fieldset>
+  <label class="field" for="instrumentSelect">악기
+    <select id="instrumentSelect">
+      <option value="piano">그랜드 피아노</option>
+      <option value="music_box">오르골</option>
+      <option value="celesta">첼레스타</option>
+      <option value="vibraphone">비브라폰</option>
+      <option value="marimba">마림바</option>
+      <option value="kalimba">칼림바</option>
+      <option value="acoustic_guitar_nylon">나일론 기타</option>
+      <option value="violin">바이올린</option>
+      <option value="flute">플루트</option>
+    </select>
+  </label>
+  <fieldset id="songFields">
+    <legend>악보</legend>
+    <label class="choice"><input type="radio" name="song" value="canon" checked>
+      <span><strong>캐논 D장조 · 파헬벨</strong><small>♩=76 · 쉬움 33 · 보통 97 · 어려움 178노트</small></span></label>
+    <label class="choice"><input type="radio" name="song" value="midi">
+      <span><strong>MIDI 파일로 만들기</strong><small id="midiInfo">가진 .mid 파일을 고르면 채보를 자동으로 만들어</small></span></label>
+    <div class="row">
+      <button class="btn" id="midiPick" type="button">MIDI 파일 고르기</button>
+      <input type="file" id="midiFile" accept=".mid,.midi,audio/midi">
+    </div>
+    <label class="field" for="midiTrack" id="midiTrackField" hidden>멜로디로 칠 트랙
+      <select id="midiTrack"></select>
+    </label>
+    <legend>난이도</legend>
+    <div class="seg">
+      <label class="choice"><input type="radio" name="level" value="easy"> 쉬움</label>
+      <label class="choice"><input type="radio" name="level" value="normal" checked> 보통</label>
+      <label class="choice"><input type="radio" name="level" value="hard"> 어려움</label>
+    </div>
+    <label class="choice"><input type="checkbox" id="autoPlay"> <span>자동 연주로 감상하기<small>노트를 대신 쳐줘</small></span></label>
+  </fieldset>
+  <p class="note">소리: Salamander Grand Piano (Alexander Holm, CC BY 3.0) · 그 외 악기 FluidR3 GM via gleitz/midi-js-soundfonts (CC BY 3.0)</p>
+  <p class="note">건반 12개(한 옥타브). 노트가 떨어지는 건반을 노란 선에서 눌러. 키보드는 A~J가 흰건반, W·E·T·Y·U가 검은건반이야. 연습 모드에선 Z·X로 옥타브, Space로 페달.</p>
+  <div class="row">
+    <button class="btn primary" id="startSong" type="button">시작</button>
+    <button class="btn" id="cancelSong" type="button">닫기</button>
+  </div>
+</section>
+
+<div class="rhythm" id="rhythm" hidden>
+  <canvas id="rhythmCanvas" aria-label="리듬 게임 노트 레인"></canvas>
+  <button class="btn stop" id="stopSong" type="button">그만하기 <kbd>Esc</kbd></button>
+  <div class="octave" id="octaveBar" hidden>
+    <button class="btn" id="octDown" type="button" aria-label="옥타브 내리기">◀ <kbd>Z</kbd></button>
+    <span id="octLabel">C4</span>
+    <button class="btn" id="octUp" type="button" aria-label="옥타브 올리기"><kbd>X</kbd> ▶</button>
+    <button class="btn" id="pedalBtn" type="button" aria-pressed="false" title="서스테인 페달 (Space)">페달 끔</button>
+  </div>
+</div>
+
+<section class="sheet" id="resultSheet" role="dialog" aria-modal="true" aria-labelledby="resultTitle" hidden>
+  <h2 id="resultTitle">연주 끝!</h2>
+  <div class="row" style="justify-content: space-between">
+    <div><div class="note">정확도</div><div class="big-num" id="resAcc">0%</div></div>
+    <div class="rank" id="resRank">A</div>
+  </div>
+  <div class="result-grid">
+    <div><b id="resPerfect">0</b>Perfect</div>
+    <div><b id="resGreat">0</b>Great</div>
+    <div><b id="resGood">0</b>Good</div>
+    <div><b id="resMiss">0</b>Miss</div>
+  </div>
+  <p class="note" id="resCombo">최대 콤보 0</p>
+  <div class="row">
+    <button class="btn primary" id="againSong" type="button">다시 연주</button>
+    <button class="btn" id="closeResult" type="button">섬으로 돌아가기</button>
+  </div>
 </section>
 
 <div class="drop" id="drop" hidden>여기에 놓으면 캐릭터가 바뀌어</div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script type="importmap">
 {
   "imports": {
@@ -177,7 +356,16 @@ const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 function setStatus(msg, isError = false) {
   statusEl.textContent = msg;
   statusEl.classList.toggle('error', isError);
+  if (isError) setPanel(true); // errors are only visible inside the panel
 }
+
+// the settings panel starts closed so the character stays in view; M toggles it too
+function setPanel(open) {
+  $('panel').hidden = !open;
+  $('menuBtn').setAttribute('aria-expanded', String(open));
+  $('menuBtn').textContent = open ? '메뉴 닫기' : '메뉴 열기';
+}
+$('menuBtn').addEventListener('click', (e) => { setPanel($('panel').hidden); e.currentTarget.blur(); });
 
 // ---------- scene ----------
 const canvas = $('stage');
@@ -275,6 +463,91 @@ let mixer = null;
 let actions = [];       // { name, action }
 let idleAction = null, walkAction = null, current = null;
 let blobUrls = [];
+let rig = null;         // bones driven by code when a model has a skeleton but no clips
+let outfits = null;     // meshes that are alternative versions of the same clothing piece
+
+// Game rips often stack every clothing variant on the body (e.g. mTops__TshirtsN, mTops__OnepieceH).
+// Meshes sharing a name prefix and material are treated as variants and only one is shown.
+function setupOutfits(obj) {
+  const groups = new Map();
+  obj.traverse((o) => {
+    if (!o.isMesh || !o.name.includes('__')) return;
+    const mat = [].concat(o.material)[0]?.name || '';
+    const key = `${o.name.split('__')[0]}|${mat}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(o);
+  });
+  const set = [...groups.values()].filter((g) => g.length > 1).sort((a, b) => b.length - a.length)[0];
+  if (!set) return null;
+  set.sort((a, b) => a.name.localeCompare(b.name));
+  const sel = $('outfitSelect');
+  sel.innerHTML = '';
+  set.forEach((m, i) => {
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = outfitLabel(m.name.split('__').slice(1).join('__'));
+    sel.appendChild(opt);
+  });
+  const preferred = set.findIndex((m) => /N$/.test(m.name) && !/mydesign|emm/i.test(m.name));
+  sel.value = String(preferred >= 0 ? preferred : 0);
+  $('outfitField').hidden = false;
+  return set;
+}
+
+// Animal Crossing clothing mesh names: <type>[mydesign|emm]<sleeve N/H/L>, e.g. TshirtsH, OnepiecemydesignN
+function outfitLabel(raw) {
+  const m = raw.match(/^(Onepiece|Tshirts)(mydesign|emm)?([NHL])?$/i);
+  if (!m) return raw;
+  const type = /onepiece/i.test(m[1]) ? '원피스' : '티셔츠';
+  const sleeve = { N: '민소매', H: '반팔', L: '긴팔' }[(m[3] || '').toUpperCase()] || '기본';
+  const extra = m[2] ? (/mydesign/i.test(m[2]) ? ' · 마이디자인용' : ' · emm') : '';
+  return `${type} · ${sleeve}${extra} (${raw})`;
+}
+
+function showOutfit(i) {
+  outfits?.forEach((m, j) => { m.visible = j === i; });
+}
+
+// Animal Crossing style rigs share these bone names; other rigs fall back to a whole-body waddle.
+const RIG_BONES = {
+  legL: /^Leg_1_L$/i, legR: /^Leg_1_R$/i,
+  armL: /^Arm_1_L$/i, armR: /^Arm_1_R$/i,
+  spine: /^Spine_1$/i, head: /^Head$/i, tail: /^TailRoot$/i,
+};
+const AXIS_X = new THREE.Vector3(1, 0, 0);
+const AXIS_Y = new THREE.Vector3(0, 1, 0);
+const AXIS_Z = new THREE.Vector3(0, 0, 1);
+
+function setupRig(obj, frame) {
+  frame.updateMatrixWorld(true);
+  const frameInv = frame.getWorldQuaternion(new THREE.Quaternion()).invert();
+  // FBX exports can carry one copy of the skeleton per mesh, so every key holds all matching bones
+  const bones = {};
+  obj.traverse((o) => {
+    if (!o.isBone || !o.parent) return;
+    for (const [key, re] of Object.entries(RIG_BONES)) {
+      if (!re.test(o.name)) continue;
+      // parent orientation expressed in the character's own frame (+Y up, +Z forward)
+      const parentQ = frameInv.clone().multiply(o.parent.getWorldQuaternion(new THREE.Quaternion()));
+      (bones[key] ||= []).push({ bone: o, base: o.quaternion.clone(), parentQ, parentInv: parentQ.clone().invert() });
+    }
+  });
+  if (!bones.legL || !bones.legR) return null;
+  return bones;
+}
+
+const _dq = new THREE.Quaternion();
+const _tq = new THREE.Quaternion();
+// rotate bones from their bind pose by (axis, angle) pairs given in the character frame;
+// the last pair is applied first
+function turnBone(entries, ...rot) {
+  if (!entries) return;
+  _dq.identity();
+  for (let i = 0; i < rot.length; i += 2) _dq.multiply(_tq.setFromAxisAngle(rot[i], rot[i + 1]));
+  for (const e of entries) {
+    e.bone.quaternion.copy(e.parentInv).multiply(_dq).multiply(e.parentQ).multiply(e.base);
+  }
+}
 
 function makeSample() {
   const root = new THREE.Group();
@@ -338,7 +611,8 @@ function clearAvatar() {
   }
   if (mixer) mixer.stopAllAction();
   mixer = null; actions = []; idleAction = walkAction = current = null;
-  sample = null; avatar = null;
+  sample = null; avatar = null; rig = null; outfits = null;
+  $('outfitField').hidden = true;
   blobUrls.forEach((u) => URL.revokeObjectURL(u));
   blobUrls = [];
   animSelect.innerHTML = '<option value="auto">자동 (멈추면 대기, 움직이면 걷기)</option>';
@@ -379,9 +653,48 @@ function play(action) {
   current = action;
 }
 
+async function expandZips(list) {
+  const out = [];
+  for (const f of list) {
+    if (!/\.zip$/i.test(f.name)) { out.push(f); continue; }
+    if (!window.JSZip) throw new Error('zip 라이브러리를 못 불러왔어. 압축을 풀어서 폴더 열기로 해줘.');
+    const zip = await JSZip.loadAsync(f);
+    for (const entry of Object.values(zip.files)) {
+      if (entry.dir || entry.name.includes('__MACOSX')) continue;
+      const blob = await entry.async('blob');
+      out.push(new File([blob], entry.name.split('/').pop()));
+    }
+  }
+  return out;
+}
+
+// Collada rips render more reliably than FBX ones; FBX materials often come out see-through.
+const MODEL_PRIORITY = ['glb', 'gltf', 'dae', 'fbx'];
+
+// ColladaLoader names bones by their sid (joint0, joint1, …). Restore the readable node names.
+async function restoreColladaBoneNames(file, obj) {
+  const doc = new DOMParser().parseFromString(await file.text(), 'application/xml');
+  const names = new Map();
+  for (const n of doc.querySelectorAll('node[type="JOINT"]')) {
+    const sid = n.getAttribute('sid'), name = n.getAttribute('name') || n.getAttribute('id');
+    if (sid && name) names.set(sid, name);
+  }
+  obj.traverse((o) => { if (o.isBone && names.has(o.name)) o.name = names.get(o.name); });
+}
+
 async function loadFiles(fileList) {
-  const files = [...fileList];
-  const main = files.find((f) => /\.(glb|gltf|fbx|dae)$/i.test(f.name));
+  let files;
+  try {
+    setStatus('파일 읽는 중…');
+    files = await expandZips([...fileList]);
+  } catch (err) {
+    setStatus(`zip 열기 실패: ${err?.message || err}`, true);
+    return;
+  }
+  const extOf = (f) => f.name.split('.').pop().toLowerCase();
+  const main = files
+    .filter((f) => MODEL_PRIORITY.includes(extOf(f)))
+    .sort((a, b) => MODEL_PRIORITY.indexOf(extOf(a)) - MODEL_PRIORITY.indexOf(extOf(b)))[0];
   if (!main) {
     setStatus('모델 파일(.dae .fbx .glb .gltf)을 못 찾았어. 모델 파일이랑 텍스처 이미지를 같이 골라줘.', true);
     return;
@@ -411,14 +724,19 @@ async function loadFiles(fileList) {
   const ext = main.name.split('.').pop().toLowerCase();
   let obj, clips;
   try {
+    // Parse the model from memory: the artifact viewer's CSP refuses fetch() on blob: URLs,
+    // so loader.load(blobUrl) fails there. Textures still go through <img>, which is allowed.
+    const base = 'local/';
     if (ext === 'dae') {
-      const c = await new ColladaLoader(manager).loadAsync(mainUrl);
+      const c = new ColladaLoader(manager).parse(await main.text(), base);
       obj = c.scene; clips = c.scene.animations || [];
+      await restoreColladaBoneNames(main, obj);
     } else if (ext === 'fbx') {
-      obj = await new FBXLoader(manager).loadAsync(mainUrl);
+      obj = new FBXLoader(manager).parse(await main.arrayBuffer(), base);
       clips = obj.animations || [];
     } else {
-      const g = await new GLTFLoader(manager).loadAsync(mainUrl);
+      const data = ext === 'gltf' ? await main.text() : await main.arrayBuffer();
+      const g = await new Promise((res, rej) => new GLTFLoader(manager).parse(data, base, res, rej));
       obj = g.scene; clips = g.animations || [];
     }
   } catch (err) {
@@ -461,9 +779,17 @@ async function loadFiles(fileList) {
     play(idleAction);
   }
 
+  if (!clips.length) rig = setupRig(obj, avatar);
+  // Animal Crossing rips include a placeholder hat mesh (Cap__…) that the game hides by default
+  obj.traverse((o) => { if (o.isMesh && /^Cap__/i.test(o.name)) o.visible = false; });
+  outfits = setupOutfits(obj);
+  if (outfits) showOutfit(Number($('outfitSelect').value));
+
   const animNote = clips.length
     ? `애니메이션 ${clips.length}개 찾았어.`
-    : '애니메이션이 없어서 통통 튀는 걸음으로 대신 움직여.';
+    : rig
+      ? '애니메이션은 없지만 뼈대를 찾아서 걷기 동작을 직접 붙였어.'
+      : '애니메이션이 없어서 통통 튀는 걸음으로 대신 움직여.';
   const texNote = missing.size
     ? ` 텍스처 ${missing.size}개를 못 찾았어 (${[...missing].slice(0, 3).join(', ')}${missing.size > 3 ? ' …' : ''}). 폴더 열기로 다시 해봐.`
     : '';
@@ -476,6 +802,11 @@ $('fileInput').addEventListener('change', (e) => { if (e.target.files.length) lo
 $('folderInput').addEventListener('change', (e) => { if (e.target.files.length) loadFiles(e.target.files); e.target.value = ''; });
 $('reset').addEventListener('click', () => { useSample(); setStatus('샘플 주민으로 돌아왔어.'); });
 $('flip').addEventListener('click', () => { turn.rotation.y = turn.rotation.y ? 0 : Math.PI; });
+$('outfitSelect').addEventListener('change', (e) => {
+  showOutfit(Number(e.target.value));
+  camDist = 5.5; // the variants differ in sleeves and hem, so zoom in to show the change
+  setStatus(`옷을 ${e.target.selectedOptions[0].textContent}(으)로 바꿨어. 소매 길이랑 하의가 달라져.`);
+});
 animSelect.addEventListener('change', () => {
   if (animSelect.value === 'auto') { current = null; mixer?.stopAllAction(); play(idleAction); return; }
   const a = actions.find((x) => x.name === animSelect.value);
@@ -498,9 +829,32 @@ const keys = new Set();
 const MOVE_KEYS = { KeyW: [0, -1], ArrowUp: [0, -1], KeyS: [0, 1], ArrowDown: [0, 1], KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0] };
 addEventListener('keydown', (e) => {
   if (e.target.closest && e.target.closest('select')) return;
+  if (perfKeydown(e)) return;
   if (MOVE_KEYS[e.code]) { keys.add(e.code); target = null; marker.visible = false; e.preventDefault(); }
+  if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) jump(); }
+  if (e.code === 'KeyE' && !e.repeat) wave();
+  if (e.code === 'KeyM' && !e.repeat) setPanel($('panel').hidden);
 });
-addEventListener('keyup', (e) => keys.delete(e.code));
+
+// ---------- actions ----------
+const GRAVITY = 20;
+const WAVE_TIME = 1.8;
+let jumpY = 0, vy = 0, airborne = false;
+let waveT = 0;
+
+function jump() {
+  if (airborne) return;
+  airborne = true;
+  vy = 6.2;
+}
+function wave() {
+  waveT = WAVE_TIME;
+  const clip = actions.find((a) => /wave|greet|hello/i.test(a.name));
+  if (clip) { animSelect.value = clip.name; play(clip.action); }
+}
+$('jumpBtn').addEventListener('click', (e) => { jump(); e.currentTarget.blur(); });
+$('waveBtn').addEventListener('click', (e) => { wave(); e.currentTarget.blur(); });
+addEventListener('keyup', (e) => { keys.delete(e.code); perfKeyup(e); });
 addEventListener('blur', () => keys.clear());
 
 let target = null;
@@ -534,7 +888,7 @@ const camPos = new THREE.Vector3();
 const lookAt = new THREE.Vector3();
 
 function resize() {
-  const w = innerWidth, h = innerHeight;
+  const w = canvas.clientWidth || innerWidth, h = canvas.clientHeight || innerHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
@@ -543,6 +897,7 @@ addEventListener('resize', resize);
 resize();
 
 function step(dt) {
+  if (perf.active) { stepPerformance(dt); return; }
   const dir = new THREE.Vector3();
   for (const k of keys) { dir.x += MOVE_KEYS[k][0]; dir.z += MOVE_KEYS[k][1]; }
   if (target) {
@@ -569,6 +924,18 @@ function step(dt) {
     phase += dt * 2;
   }
 
+  if (airborne) {
+    vy -= GRAVITY * dt;
+    jumpY += vy * dt;
+    if (jumpY <= 0) { jumpY = 0; vy = 0; airborne = false; }
+  }
+  player.position.y = jumpY;
+  waveT = Math.max(0, waveT - dt);
+  // 0→1→0 envelope so the arm eases up and back down
+  const waveK = waveT > 0 ? Math.min(1, (WAVE_TIME - waveT) * 5, waveT * 5) : 0;
+  const waveSwing = Math.sin((WAVE_TIME - waveT) * 13) * 0.35;
+  const air = airborne ? 1 : 0;
+
   // animation
   if (mixer) {
     if (animSelect.value === 'auto') play(moving ? walkAction : idleAction);
@@ -582,15 +949,48 @@ function step(dt) {
     const bob = moving ? Math.abs(Math.sin(phase)) * 0.06 : (reduceMotion ? 0 : Math.sin(phase) * 0.015);
     sample.root.position.y = bob;
     sample.head.rotation.z = moving ? Math.sin(phase) * 0.06 : 0;
+    if (air) {
+      sample.legL.rotation.x = sample.legR.rotation.x = -0.5;
+      sample.armL.rotation.z = 0.25 + 1.2; sample.armR.rotation.z = -0.25 - 1.2;
+    } else {
+      sample.armL.rotation.z = 0.25; sample.armR.rotation.z = -0.25;
+    }
+    if (waveK) {
+      // right hand on screen-left of the villager: lift the +x arm overhead and swing it
+      sample.armR.rotation.x = 0;
+      sample.armR.rotation.z = -0.25 + waveK * (2.7 + waveSwing);
+      sample.head.rotation.z = waveK * 0.12;
+    }
+  } else if (rig) {
+    const s = Math.sin(phase);
+    const k = moving && !air ? 1 : 0;
+    turnBone(rig.legL, AXIS_X, air ? -0.6 : s * 0.55 * k);
+    turnBone(rig.legR, AXIS_X, air ? -0.35 : -s * 0.55 * k);
+    // bind pose is a T-pose (left arm along +X, right along -X): lower both to the sides,
+    // raise them a little while airborne, and swing them around X while walking
+    const ARM_DOWN = 1.25;
+    turnBone(rig.armL, AXIS_X, -s * 0.5 * k, AXIS_Z, air ? 0.5 : -ARM_DOWN);
+    if (waveK) {
+      const down = ARM_DOWN * (1 - waveK);
+      const up = waveK * (0.45 + waveSwing); // big head: keep the hand low enough to peek out beside it
+      turnBone(rig.armR, AXIS_Z, down - up);
+    } else {
+      turnBone(rig.armR, AXIS_X, s * 0.5 * k, AXIS_Z, air ? -0.5 : ARM_DOWN);
+    }
+    turnBone(rig.spine, AXIS_Y, s * 0.08 * k);
+    turnBone(rig.head, AXIS_Z, waveK ? waveK * -0.15 : moving ? s * 0.06 : (reduceMotion ? 0 : Math.sin(phase * 0.7) * 0.04));
+    turnBone(rig.tail, AXIS_Y, reduceMotion ? 0 : Math.sin(phase * (moving ? 1 : 1.6)) * 0.35);
+    avatar.position.y = moving && !air ? Math.abs(s) * 0.05 : 0;
   } else if (avatar) {
-    avatar.position.y = moving ? Math.abs(Math.sin(phase)) * 0.08 : 0;
-    avatar.rotation.z = moving ? Math.sin(phase) * 0.07 : 0;
+    avatar.position.y = moving && !air ? Math.abs(Math.sin(phase)) * 0.08 : 0;
+    avatar.rotation.z = waveK ? waveSwing * 0.3 : moving ? Math.sin(phase) * 0.07 : 0;
   }
 
   if (marker.visible && !reduceMotion) marker.scale.setScalar(1 + Math.sin(clock.elapsedTime * 6) * 0.1);
 
-  // camera: high, fixed angle like a top-down island view
-  camPos.set(player.position.x, camDist * 0.72, player.position.z + camDist * 0.78);
+  // camera: high angle when far, lower and more frontal as you zoom in
+  const zoomT = (camDist - 5) / 15;
+  camPos.set(player.position.x, 0.8 + camDist * (0.2 + 0.52 * zoomT), player.position.z + camDist * 0.85);
   camera.position.lerp(camPos, Math.min(1, dt * 5));
   lookAt.set(player.position.x, 0.8, player.position.z);
   camera.lookAt(lookAt);
@@ -599,7 +999,960 @@ function step(dt) {
   sun.target.position.copy(player.position);
 }
 
+// A copy published with model/manifest.json next to the page opens that model on start.
+async function loadBundled() {
+  try {
+    const res = await fetch('model/manifest.json', { cache: 'no-store' });
+    if (!res.ok) return;
+    const { files } = await res.json();
+    // entries are "file.png" or { path: "model.xml", name: "model.dae" } when the host renames an extension
+    const loaded = await Promise.all(files.map(async (entry) => {
+      const { path, name } = typeof entry === 'string' ? { path: entry, name: entry } : entry;
+      const r = await fetch(`model/${encodeURIComponent(path)}`);
+      if (!r.ok) throw new Error(path);
+      return new File([await r.blob()], name);
+    }));
+    await loadFiles(loaded);
+  } catch {
+    // no bundled model: keep the sample villager
+  }
+}
+
+// ---------- performance mode: toy keyboard + 12-key falling-note rhythm game ----------
+// Chart notes are { t, lane, midi }: the lane is the pitch class (C=0 … B=11) so a note falls onto
+// its own key, while the sound uses the stored pitch. One octave of keys plays any octave of music.
+const NOTE_INDEX = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+const midiOf = (n) => {
+  const m = n.match(/^([A-G])(#?)(\d)$/);
+  return 12 * (Number(m[3]) + 1) + NOTE_INDEX[m[1]] + (m[2] ? 1 : 0);
+};
+const freqOf = (midi) => 440 * Math.pow(2, (midi - 69) / 12);
+const PC_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const SOLFEGE = { 0: '도', 2: '레', 4: '미', 5: '파', 7: '솔', 9: '라', 11: '시' };
+const WHITE_PCS = [0, 2, 4, 5, 7, 9, 11];
+const BLACK_AFTER = { 1: 0, 3: 1, 6: 3, 8: 4, 10: 5 }; // black pitch class → white key index on its left
+// computer keyboard laid out like a piano: home row = white keys, row above = black keys
+const KEYMAP = { KeyA: 0, KeyW: 1, KeyS: 2, KeyE: 3, KeyD: 4, KeyF: 5, KeyT: 6, KeyG: 7, KeyY: 8, KeyH: 9, KeyU: 10, KeyJ: 11 };
+const KEY_LETTER = Object.fromEntries(Object.entries(KEYMAP).map(([k, pc]) => [pc, k.slice(3)]));
+
+// Pachelbel's Canon in D over its 8-chord ground bass (2 beats per chord, 16 beats per cycle).
+// "A+B" is two notes struck together.
+const CANON_CYCLES = {
+  theme: { beat: 2, notes: 'F#5 E5 D5 C#5 B4 A4 B4 C#5' },
+  themeThirds: { beat: 2, notes: 'F#5+D5 E5+C#5 D5+B4 C#5+A4 B4+G4 A4+F#4 B4+G4 C#5+A4' },
+  quarters: { beat: 1, notes: 'D5 F#5 A5 G5 F#5 D5 F#5 E5 D5 B4 D5 A5 G5 B5 A5 G5' },
+  arps: { beat: 0.5, notes: 'D5 F#5 A5 F#5 C#5 E5 A5 E5 B4 D5 F#5 D5 A4 C#5 F#5 C#5 B4 D5 G5 D5 A4 D5 F#5 D5 B4 D5 G5 D5 C#5 E5 A5 E5' },
+  arpsDown: { beat: 0.5, notes: 'A5 F#5 D5 F#5 A5 E5 C#5 E5 F#5 D5 B4 D5 F#5 C#5 A4 C#5 G5 D5 B4 D5 F#5 D5 A4 D5 G5 D5 B4 D5 A5 E5 C#5 E5' },
+  runs: {
+    beat: 0.25,
+    notes: 'D5 E5 F#5 G5 A5 G5 F#5 E5 C#5 D5 E5 F#5 A5 F#5 E5 D5 B4 C#5 D5 E5 F#5 E5 D5 C#5 A4 B4 C#5 E5 F#5 E5 C#5 B4 '
+      + 'G4 A4 B4 C#5 D5 B4 G4 B4 F#4 G4 A4 B4 D5 A4 F#4 A4 G4 A4 B4 D5 G5 D5 B4 D5 A4 B4 C#5 E5 A5 E5 C#5 A4',
+  },
+};
+const SONGS = {
+  canon: {
+    title: '캐논 D장조',
+    bpm: 76,
+    bass: ['D3', 'A2', 'B2', 'F#2', 'G2', 'D2', 'G2', 'A2'],
+    chords: [
+      ['F#4', 'A4', 'D5'], ['E4', 'A4', 'C#5'], ['F#4', 'B4', 'D5'], ['F#4', 'A4', 'C#5'],
+      ['G4', 'B4', 'D5'], ['F#4', 'A4', 'D5'], ['G4', 'B4', 'D5'], ['E4', 'A4', 'C#5'],
+    ],
+    levels: {
+      easy: { label: '쉬움', fall: 1.8, cycles: ['theme', 'quarters', 'theme'], ending: 'D5' },
+      normal: { label: '보통', fall: 1.35, cycles: ['theme', 'quarters', 'arps', 'arpsDown', 'theme'], ending: 'D5' },
+      hard: { label: '어려움', fall: 1.0, cycles: ['themeThirds', 'quarters', 'arps', 'runs', 'arpsDown', 'themeThirds'], ending: 'D5+F#5' },
+    },
+  },
+};
+
+const COUNT_IN = 4;
+const WINDOW = { PERFECT: 0.05, GREAT: 0.1, GOOD: 0.15 };
+const POINTS = { PERFECT: 1000, GREAT: 700, GOOD: 400, MISS: 0 };
+
+function buildChart(song, levelKey) {
+  const level = song.levels[levelKey];
+  const spb = 60 / song.bpm;
+  const notes = [];
+  let beat = 0;
+  const push = (group, b) => {
+    for (const name of group.split('+')) {
+      const midi = midiOf(name);
+      notes.push({ t: (COUNT_IN + b) * spb, lane: midi % 12, midi });
+    }
+  };
+  for (const id of level.cycles) {
+    const cycle = CANON_CYCLES[id];
+    for (const group of cycle.notes.split(' ')) { push(group, beat); beat += cycle.beat; }
+  }
+  const musicBeats = beat;
+  push(level.ending, musicBeats);
+  notes.sort((a, b) => a.t - b.t);
+
+  const accomp = [];
+  for (let b = 0; b <= musicBeats; b += 2) {
+    const i = (b / 2) % 8;
+    const final = b === musicBeats;
+    const t = (COUNT_IN + b) * spb;
+    accomp.push({ t, midi: midiOf(final ? 'D2' : song.bass[i]), vel: 0.5, dur: final ? 3 : spb * 2 });
+    for (const c of final ? ['F#4', 'A4', 'D5'] : song.chords[i]) {
+      accomp.push({ t: t + 0.01, midi: midiOf(c), vel: 0.16, dur: final ? 3 : spb * 1.9 });
+    }
+  }
+  const clicks = Array.from({ length: COUNT_IN }, (_, i) => i * spb);
+  return { notes, accomp, clicks, spb, fall: level.fall, label: level.label, title: song.title, end: (COUNT_IN + musicBeats + 4) * spb };
+}
+
+// --- sound ---
+// Piano: Salamander Grand Piano samples (Alexander Holm, CC BY 3.0) recorded every minor third,
+// pitch-shifted to the notes in between. Until they load (or if they can't), a simple synth plays.
+let actx = null;
+let master = null;   // per-session gain, cut when a performance ends
+let bus = null;      // compressor + light reverb shared by every session
+const SAMPLE_ROOTS = [];
+for (let o = 2; o <= 6; o++) for (const [n, pc] of [['C', 0], ['Ds', 3], ['Fs', 6], ['A', 9]]) SAMPLE_ROOTS.push({ file: `${n}${o}`, midi: 12 * (o + 1) + pc });
+SAMPLE_ROOTS.push({ file: 'C7', midi: 96 });
+// Other instruments: FluidR3 GM soundfont renders from gleitz/midi-js-soundfonts (CC BY 3.0),
+// same minor-third layout as the piano.
+const INSTRUMENTS = {
+  piano: { label: '그랜드 피아노', dir: 'samples/salamander', gain: 0.85 },
+  music_box: { label: '오르골', dir: 'samples/fluidr3/music_box', gain: 0.8 },
+  celesta: { label: '첼레스타', dir: 'samples/fluidr3/celesta', gain: 0.8 },
+  vibraphone: { label: '비브라폰', dir: 'samples/fluidr3/vibraphone', gain: 0.8 },
+  marimba: { label: '마림바', dir: 'samples/fluidr3/marimba', gain: 0.9 },
+  kalimba: { label: '칼림바', dir: 'samples/fluidr3/kalimba', gain: 0.9 },
+  acoustic_guitar_nylon: { label: '나일론 기타', dir: 'samples/fluidr3/acoustic_guitar_nylon', gain: 0.9 },
+  violin: { label: '바이올린', dir: 'samples/fluidr3/violin', gain: 0.7 },
+  flute: { label: '플루트', dir: 'samples/fluidr3/flute', gain: 0.7 },
+};
+const instBuffers = {};  // instrument → Map(root midi → AudioBuffer)
+const instLoading = {};
+function loadInstrument(key) {
+  if (!INSTRUMENTS[key]) key = 'piano';
+  instBuffers[key] ||= new Map();
+  instLoading[key] ||= Promise.all(SAMPLE_ROOTS.map(async ({ file, midi }) => {
+    try {
+      const res = await fetch(`${INSTRUMENTS[key].dir}/${file}.mp3`);
+      if (!res.ok) return;
+      instBuffers[key].set(midi, await actx.decodeAudioData(await res.arrayBuffer()));
+    } catch { /* missing sample: that range falls back to the nearest loaded one or the synth */ }
+  }));
+  return instLoading[key];
+}
+
+function initAudio() {
+  if (!actx) {
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    const comp = actx.createDynamicsCompressor();
+    comp.threshold.value = -14;
+    comp.ratio.value = 4;
+    // small synthetic room: decaying noise as an impulse response
+    const len = Math.floor(actx.sampleRate * 1.6);
+    const ir = actx.createBuffer(2, len, actx.sampleRate);
+    for (let c = 0; c < 2; c++) {
+      const d = ir.getChannelData(c);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+    }
+    const verb = actx.createConvolver();
+    verb.buffer = ir;
+    const wet = actx.createGain();
+    wet.gain.value = 0.18;
+    bus = actx.createGain();
+    bus.connect(comp);
+    bus.connect(verb); verb.connect(wet); wet.connect(comp);
+    comp.connect(actx.destination);
+  }
+  actx.resume();
+  loadInstrument('piano');
+  return loadInstrument($('instrumentSelect').value);
+}
+function ensureAudio() {
+  initAudio();
+  if (master) master.disconnect();
+  master = actx.createGain();
+  master.gain.value = 0.9;
+  master.connect(bus);
+}
+
+function nearestRoot(buffers, midi) {
+  let best = null;
+  for (const root of buffers.keys()) if (best === null || Math.abs(root - midi) < Math.abs(best - midi)) best = root;
+  return best;
+}
+
+// Starts a note and returns a voice whose release() lets it fade like a piano damper.
+// With dur, the note releases on its own after that many seconds.
+function playNote(midi, when = actx.currentTime, vel = 0.8, dur = null, inst = 'piano') {
+  const g = actx.createGain();
+  g.connect(master);
+  // an instrument still loading borrows the piano
+  let buffers = instBuffers[inst];
+  if (!buffers || !buffers.size) { buffers = instBuffers.piano || new Map(); inst = 'piano'; }
+  vel *= INSTRUMENTS[inst].gain / 0.85;
+  const root = nearestRoot(buffers, midi);
+  let stopAt = Infinity;
+  let src;
+  if (root !== null) {
+    src = actx.createBufferSource();
+    src.buffer = buffers.get(root);
+    src.playbackRate.value = Math.pow(2, (midi - root) / 12);
+    g.gain.setValueAtTime(vel, when);
+    src.connect(g);
+    src.start(when);
+  } else {
+    src = actx.createOscillator();
+    src.type = 'triangle';
+    src.frequency.value = freqOf(midi);
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.linearRampToValueAtTime(vel * 0.3, when + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + 1.6);
+    src.connect(g);
+    src.start(when);
+    stopAt = when + 1.7;
+    src.stop(stopAt);
+  }
+  const voice = {
+    released: false,
+    release(at = actx.currentTime) {
+      if (voice.released) return;
+      voice.released = true;
+      const t = Math.max(at, when);
+      if (g.gain.cancelAndHoldAtTime) g.gain.cancelAndHoldAtTime(t);
+      else { g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(vel, t); }
+      g.gain.setTargetAtTime(0, t, 0.12);
+      if (t + 1 < stopAt) src.stop(t + 1);
+    },
+  };
+  if (dur) voice.release(when + dur);
+  return voice;
+}
+
+// metronome click and other non-piano blips
+function tone(freq, when, vel = 0.2, dur = 1.2, type = 'triangle') {
+  const o = actx.createOscillator();
+  const g = actx.createGain();
+  o.type = type; o.frequency.value = freq;
+  o.connect(g); g.connect(master);
+  g.gain.setValueAtTime(0.0001, when);
+  g.gain.linearRampToValueAtTime(vel, when + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+  o.start(when);
+  o.stop(when + dur + 0.05);
+}
+
+// --- the 3D instrument: a two-octave keyboard on a stand ---
+const piano = new THREE.Group();
+const pianoKeyMeshes = new Map(); // midi offset from C (0–23) → mesh
+{
+  const wood = new THREE.MeshLambertMaterial({ color: 0xc0573e });
+  const dark = new THREE.MeshLambertMaterial({ color: 0x3a2a24 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.12, 0.34), wood);
+  body.position.y = 0.5;
+  const legGeo = new THREE.CylinderGeometry(0.025, 0.025, 0.46, 8);
+  for (const x of [-0.5, 0.5]) for (const z of [-0.12, 0.12]) {
+    const leg = new THREE.Mesh(legGeo, dark);
+    leg.position.set(x, 0.23, z);
+    piano.add(leg);
+  }
+  piano.add(body);
+  const whiteGeo = new THREE.BoxGeometry(0.075, 0.035, 0.2);
+  const whiteMat = new THREE.MeshLambertMaterial({ color: 0xfbf8f0 });
+  const blackGeo = new THREE.BoxGeometry(0.045, 0.04, 0.12);
+  for (let i = 0; i < 14; i++) {
+    const octave = Math.floor(i / 7);
+    const pc = WHITE_PCS[i % 7];
+    const k = new THREE.Mesh(whiteGeo, whiteMat);
+    k.position.set(-0.49 + i * 0.0755, 0.575, -0.04);
+    k.userData.rest = k.position.y;
+    k.userData.dip = 0;
+    piano.add(k);
+    pianoKeyMeshes.set(octave * 12 + pc, k);
+    const blackPc = pc + 1;
+    if (BLACK_AFTER[blackPc] !== undefined) {
+      const b = new THREE.Mesh(blackGeo, dark);
+      b.position.set(k.position.x + 0.038, 0.6, -0.08);
+      b.userData.rest = b.position.y;
+      b.userData.dip = 0;
+      piano.add(b);
+      pianoKeyMeshes.set(octave * 12 + blackPc, b);
+    }
+  }
+  piano.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  piano.visible = false;
+  scene.add(piano);
+}
+function dipPianoKey(midi) {
+  const mesh = pianoKeyMeshes.get((midi >= 72 ? 12 : 0) + (midi % 12));
+  if (mesh) mesh.userData.dip = 1;
+}
+
+// --- state ---
+const perf = {
+  active: false, mode: 'song', song: 'canon', level: 'normal', auto: false, instrument: 'piano', accompIdx: 0,
+  chart: null, t0: 0, now: 0, octave: 4,
+  combo: 0, maxCombo: 0, score: 0,
+  counts: { PERFECT: 0, GREAT: 0, GOOD: 0, MISS: 0 },
+  judge: null, keyFlash: new Array(12).fill(0), keyHeld: new Array(12).fill(0),
+  handL: 0, handR: 0, finished: false, lastNote: null,
+};
+const rhythmEl = $('rhythm');
+const rc = $('rhythmCanvas');
+const rctx = rc.getContext('2d');
+
+function sizeRhythm() {
+  const dpr = Math.min(devicePixelRatio, 2);
+  rc.width = Math.round(rc.clientWidth * dpr);
+  rc.height = Math.round(rc.clientHeight * dpr);
+  rctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+addEventListener('resize', () => { if (perf.active) sizeRhythm(); });
+
+function syncSheet() {
+  $('songFields').disabled = document.querySelector('input[name="mode"]:checked').value === 'free';
+}
+document.querySelectorAll('input[name="mode"]').forEach((r) => r.addEventListener('change', syncSheet));
+
+function openSongSheet() {
+  if (perf.active) return;
+  keys.clear(); target = null; marker.visible = false;
+  syncSheet();
+  initAudio();
+  $('songSheet').hidden = false;
+  $('startSong').focus();
+}
+$('playBtn').addEventListener('click', openSongSheet);
+$('cancelSong').addEventListener('click', () => { $('songSheet').hidden = true; });
+$('startSong').addEventListener('click', () => {
+  perf.mode = document.querySelector('input[name="mode"]:checked').value;
+  perf.song = document.querySelector('input[name="song"]:checked').value;
+  perf.instrument = $('instrumentSelect').value;
+  if (perf.mode === 'song' && perf.song === 'midi' && !midiSong) {
+    $('midiInfo').textContent = '먼저 MIDI 파일을 골라줘.';
+    return;
+  }
+  perf.level = document.querySelector('input[name="level"]:checked').value;
+  perf.auto = $('autoPlay').checked;
+  $('songSheet').hidden = true;
+  loadInstrument(perf.instrument);
+  startPerformance();
+});
+$('stopSong').addEventListener('click', () => endPerformance());
+$('againSong').addEventListener('click', () => { $('resultSheet').hidden = true; startPerformance(); });
+$('closeResult').addEventListener('click', () => { $('resultSheet').hidden = true; endPerformance(); });
+$('midiPick').addEventListener('click', () => $('midiFile').click());
+$('octDown').addEventListener('click', () => shiftOctave(-1));
+$('octUp').addEventListener('click', () => shiftOctave(1));
+$('pedalBtn').addEventListener('click', (e) => { setPedal(!perf.pedal); e.currentTarget.blur(); });
+function shiftOctave(d) {
+  perf.octave = THREE.MathUtils.clamp(perf.octave + d, 2, 6);
+  $('octLabel').textContent = `C${perf.octave}`;
+}
+
+// --- MIDI import: turn any .mid file into a chart ---
+// Reads note on/off events and the tempo map from a Standard MIDI File (format 0 or 1).
+function parseMidi(buf) {
+  const v = new DataView(buf);
+  let p = 0;
+  const str = (n) => { let s = ''; for (let i = 0; i < n; i++) s += String.fromCharCode(v.getUint8(p + i)); p += n; return s; };
+  const u32 = () => { const x = v.getUint32(p); p += 4; return x; };
+  const u16 = () => { const x = v.getUint16(p); p += 2; return x; };
+  const vlq = () => { let x = 0, b; do { b = v.getUint8(p++); x = (x << 7) | (b & 0x7f); } while (b & 0x80); return x; };
+  if (str(4) !== 'MThd') throw new Error('MIDI 파일이 아니야');
+  const hlen = u32();
+  u16(); // format
+  const ntracks = u16();
+  const division = u16();
+  p += hlen - 6;
+  if (division & 0x8000) throw new Error('SMPTE 타임코드 MIDI는 지원 안 해');
+
+  const tempos = [{ tick: 0, uspq: 500000 }];
+  const tracks = [];
+  for (let t = 0; t < ntracks && p < buf.byteLength; t++) {
+    const id = str(4);
+    const len = u32();
+    const end = p + len;
+    if (id !== 'MTrk') { p = end; continue; }
+    const track = { name: '', notes: [], channel: null };
+    const open = new Map();
+    let tick = 0, status = 0;
+    while (p < end) {
+      tick += vlq();
+      let b = v.getUint8(p);
+      if (b & 0x80) { status = b; p++; } // otherwise running status
+      const type = status & 0xf0, ch = status & 0x0f;
+      if (status === 0xff) {
+        const meta = v.getUint8(p++);
+        const mlen = vlq();
+        if (meta === 0x51) {
+          const uspq = (v.getUint8(p) << 16) | (v.getUint8(p + 1) << 8) | v.getUint8(p + 2);
+          const same = tempos.find((x) => x.tick === tick);
+          if (same) same.uspq = uspq; else tempos.push({ tick, uspq });
+        }
+        if (meta === 0x03) { const save = p; track.name = str(mlen); p = save; }
+        p += mlen;
+      } else if (status === 0xf0 || status === 0xf7) {
+        p += vlq();
+      } else if (type === 0x90 || type === 0x80) {
+        const note = v.getUint8(p), vel = v.getUint8(p + 1);
+        p += 2;
+        const key = ch * 128 + note;
+        if (type === 0x90 && vel > 0) {
+          if (!open.has(key)) open.set(key, []);
+          open.get(key).push({ tick, vel });
+        } else {
+          const start = open.get(key)?.shift();
+          if (start && ch !== 9) track.notes.push({ tick: start.tick, endTick: tick, midi: note, vel: start.vel, ch });
+        }
+      } else if (type === 0xc0 || type === 0xd0) {
+        p += 1;
+      } else {
+        p += 2;
+      }
+    }
+    p = end;
+    if (track.notes.length) tracks.push(track);
+  }
+
+  // ticks → seconds through the tempo map
+  tempos.sort((a, b) => a.tick - b.tick);
+  const segs = [];
+  let sec = 0;
+  for (let i = 0; i < tempos.length; i++) {
+    const { tick, uspq } = tempos[i];
+    if (i > 0) sec += ((tick - tempos[i - 1].tick) * tempos[i - 1].uspq) / 1e6 / division;
+    segs.push({ tick, sec, uspq });
+  }
+  const toSec = (tick) => {
+    let s = segs[0];
+    for (const seg of segs) { if (seg.tick <= tick) s = seg; else break; }
+    return s.sec + ((tick - s.tick) * s.uspq) / 1e6 / division;
+  };
+  for (const tr of tracks) {
+    for (const n of tr.notes) { n.t = toSec(n.tick); n.dur = Math.max(0.05, toSec(n.endTick) - n.t); }
+    tr.notes.sort((a, b) => a.t - b.t || b.midi - a.midi);
+    tr.drums = tr.notes.every((n) => n.ch === 9);
+    tr.avgPitch = tr.notes.reduce((s, n) => s + n.midi, 0) / tr.notes.length;
+  }
+  return { tracks: tracks.filter((tr) => !tr.drums), bpm: 60e6 / segs[0].uspq };
+}
+
+let midiSong = null; // { title, tracks, bpm, melody }
+
+// the melody is the highest-sounding track that has a reasonable number of notes
+function pickMelodyTrack(tracks) {
+  const candidates = tracks.filter((tr) => tr.notes.length >= 16);
+  return (candidates.length ? candidates : tracks).reduce((best, tr, i, arr) => (tr.avgPitch > arr[best].avgPitch ? i : best), 0);
+}
+
+const MIDI_LEVELS = {
+  easy: { label: '쉬움', fall: 1.8, gap: 0.42, chord: 1 },
+  normal: { label: '보통', fall: 1.35, gap: 0.2, chord: 1 },
+  hard: { label: '어려움', fall: 1.0, gap: 0.09, chord: 2 },
+};
+
+function buildMidiChart(song, levelKey) {
+  const level = MIDI_LEVELS[levelKey];
+  const spb = 60 / song.bpm;
+  const lead = COUNT_IN * spb;
+  const melody = song.tracks[song.melody];
+  const notes = [];
+  const accomp = [];
+  // keep the top note(s) of each onset, spaced out by the level's minimum gap; the rest is played for you
+  let lastT = -Infinity;
+  for (let i = 0; i < melody.notes.length;) {
+    const t = melody.notes[i].t;
+    const group = [];
+    while (i < melody.notes.length && melody.notes[i].t - t < 0.03) group.push(melody.notes[i++]);
+    group.sort((a, b) => b.midi - a.midi);
+    const take = [];
+    if (t - lastT >= level.gap) {
+      for (const n of group) {
+        if (take.length >= level.chord) break;
+        if (!take.some((x) => x.midi % 12 === n.midi % 12)) take.push(n);
+      }
+      lastT = t;
+    }
+    for (const n of group) {
+      if (take.includes(n)) notes.push({ t: lead + n.t, lane: n.midi % 12, midi: n.midi });
+      else accomp.push({ t: lead + n.t, midi: n.midi, vel: 0.35, dur: Math.min(n.dur, 3) });
+    }
+  }
+  song.tracks.forEach((tr, i) => {
+    if (i === song.melody) return;
+    for (const n of tr.notes) accomp.push({ t: lead + n.t, midi: n.midi, vel: 0.12 + (n.vel / 127) * 0.2, dur: Math.min(n.dur, 4) });
+  });
+  const last = Math.max(...song.tracks.flatMap((tr) => tr.notes.map((n) => n.t + n.dur)));
+  const clicks = Array.from({ length: COUNT_IN }, (_, i) => i * spb);
+  return { notes, accomp, clicks, spb, fall: level.fall, label: level.label, title: song.title, end: lead + last + 2 };
+}
+
+$('midiFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const parsed = parseMidi(await file.arrayBuffer());
+    if (!parsed.tracks.length) throw new Error('연주할 음표가 없어');
+    midiSong = { title: file.name.replace(/\.midi?$/i, ''), ...parsed };
+    midiSong.melody = pickMelodyTrack(midiSong.tracks);
+    const sel = $('midiTrack');
+    sel.innerHTML = '';
+    midiSong.tracks.forEach((tr, i) => {
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = `${tr.name || `트랙 ${i + 1}`} · 음표 ${tr.notes.length}개 · 평균 ${PC_NAMES[Math.round(tr.avgPitch) % 12]}${Math.floor(Math.round(tr.avgPitch) / 12) - 1}`;
+      sel.appendChild(opt);
+    });
+    sel.value = String(midiSong.melody);
+    $('midiTrackField').hidden = false;
+    $('midiInfo').textContent = `${midiSong.title} · 약 ${Math.round(midiSong.bpm)} BPM · 트랙 ${midiSong.tracks.length}개`;
+    document.querySelector('input[name="song"][value="midi"]').checked = true;
+  } catch (err) {
+    midiSong = null;
+    $('midiTrackField').hidden = true;
+    $('midiInfo').textContent = `불러오기 실패: ${err?.message || err}`;
+  }
+});
+$('midiTrack').addEventListener('change', (e) => { if (midiSong) midiSong.melody = Number(e.target.value); });
+$('instrumentSelect').addEventListener('change', (e) => { if (actx) loadInstrument(e.target.value); });
+
+function startPerformance() {
+  ensureAudio();
+  Object.assign(perf, {
+    active: true, combo: 0, maxCombo: 0, score: 0, judge: null, finished: false, lastNote: null,
+    counts: { PERFECT: 0, GREAT: 0, GOOD: 0, MISS: 0 },
+  });
+  perf.t0 = actx.currentTime + 0.4;
+  if (perf.mode === 'song') {
+    const chart = perf.song === 'midi' ? buildMidiChart(midiSong, perf.level) : buildChart(SONGS[perf.song], perf.level);
+    perf.chart = chart;
+    chart.notes.forEach((n) => { n.done = null; });
+    for (const c of chart.clicks) tone(1568, perf.t0 + c, 0.08, 0.08, 'square');
+    chart.accomp.sort((a, b) => a.t - b.t);
+    perf.accompIdx = 0;
+  } else {
+    perf.chart = null;
+  }
+  $('octaveBar').hidden = perf.mode !== 'free';
+  setPedal(false);
+  $('octLabel').textContent = `C${perf.octave}`;
+
+  player.rotation.y = 0;
+  piano.position.set(player.position.x, 0, player.position.z + 0.62);
+  piano.visible = true;
+  keys.clear(); target = null; marker.visible = false;
+  setPanel(false);
+  document.body.classList.add('playing');
+  rhythmEl.hidden = false;
+  resize();
+  sizeRhythm();
+}
+
+function endPerformance() {
+  if (master) {
+    const m = master;
+    m.gain.setTargetAtTime(0, actx.currentTime, 0.05);
+    setTimeout(() => m.disconnect(), 400);
+    master = null;
+  }
+  perf.active = false;
+  perf.keyHeld.fill(0);
+  heldVoices.clear();
+  pedalVoices.length = 0;
+  perf.pedal = false;
+  piano.visible = false;
+  rhythmEl.hidden = true;
+  $('resultSheet').hidden = true;
+  document.body.classList.remove('playing');
+  resize();
+}
+
+function showResult() {
+  perf.finished = true;
+  const c = perf.counts;
+  const total = perf.chart.notes.length;
+  const acc = total ? (c.PERFECT + c.GREAT * 0.7 + c.GOOD * 0.4) / total : 0;
+  const rank = acc >= 0.95 ? 'S' : acc >= 0.85 ? 'A' : acc >= 0.7 ? 'B' : acc >= 0.5 ? 'C' : 'D';
+  $('resAcc').textContent = `${(acc * 100).toFixed(1)}%`;
+  $('resRank').textContent = rank;
+  $('resPerfect').textContent = c.PERFECT;
+  $('resGreat').textContent = c.GREAT;
+  $('resGood').textContent = c.GOOD;
+  $('resMiss').textContent = c.MISS;
+  $('resCombo').textContent = `${perf.chart.label} · 노트 ${total}개 · 최대 콤보 ${perf.maxCombo} · 점수 ${perf.score.toLocaleString()}${perf.auto ? ' · 자동 연주' : ''}`;
+  $('resultSheet').hidden = false;
+}
+
+function strike(midi, when, held = false) {
+  const voice = playNote(midi, when ?? actx.currentTime, 0.85, held ? null : 1.4, perf.instrument);
+  dipPianoKey(midi);
+  // keys below F strike with the left hand, F and up with the right
+  if (midi % 12 < 5) perf.handL = 1; else perf.handR = 1;
+  perf.lastNote = { midi, at: perf.now };
+  return voice;
+}
+
+function judge(n, grade, when) {
+  n.done = grade;
+  perf.counts[grade]++;
+  perf.score += POINTS[grade];
+  if (grade === 'MISS') { perf.combo = 0; perf.judge = { grade, at: perf.now }; return; }
+  perf.combo++;
+  perf.maxCombo = Math.max(perf.maxCombo, perf.combo);
+  perf.judge = { grade, at: perf.now };
+  return strike(n.midi, when);
+}
+
+// a key with no note under it still sounds, near the melody range
+const freeMidi = (pc) => (pc >= 9 ? 69 + (pc - 9) : 72 + pc);
+
+// returns the voice it started so the caller can release it when the finger lifts
+function pressKey(pc) {
+  perf.keyFlash[pc] = 1;
+  if (perf.mode === 'free') return strike(12 * (perf.octave + 1) + pc, undefined, true);
+  if (perf.auto || perf.finished) return null;
+  const now = actx.currentTime - perf.t0;
+  let best = null;
+  for (const n of perf.chart.notes) {
+    if (n.t - now > WINDOW.GOOD) break;
+    if (n.done || n.lane !== pc) continue;
+    const d = Math.abs(n.t - now);
+    if (d <= WINDOW.GOOD && (!best || d < Math.abs(best.t - now))) best = n;
+  }
+  if (!best) return strike(freeMidi(pc));
+  const d = Math.abs(best.t - now);
+  return judge(best, d <= WINDOW.PERFECT ? 'PERFECT' : d <= WINDOW.GREAT ? 'GREAT' : 'GOOD');
+}
+
+function perfKeydown(e) {
+  if (!$('songSheet').hidden) {
+    if (e.code === 'Escape') $('songSheet').hidden = true;
+    return true; // no walking or jumping behind the dialog
+  }
+  if (!perf.active) {
+    if (e.code === 'KeyP' && !e.repeat) { openSongSheet(); return true; }
+    return false;
+  }
+  if (e.target.closest && e.target.closest('button') && (e.code === 'Space' || e.code === 'Enter')) return true;
+  e.preventDefault();
+  if (e.code === 'Escape') { endPerformance(); return true; }
+  if (perf.mode === 'free' && !e.repeat) {
+    if (e.code === 'KeyZ') { shiftOctave(-1); return true; }
+    if (e.code === 'KeyX') { shiftOctave(1); return true; }
+    if (e.code === 'Space') { setPedal(!perf.pedal); return true; }
+  }
+  const pc = KEYMAP[e.code];
+  if (pc !== undefined && !e.repeat) { perf.keyHeld[pc]++; heldVoices.set(e.code, pressKey(pc)); }
+  return true;
+}
+function perfKeyup(e) {
+  const pc = KEYMAP[e.code];
+  if (pc === undefined) return;
+  perf.keyHeld[pc] = Math.max(0, perf.keyHeld[pc] - 1);
+  releaseHeld(e.code);
+}
+// each finger or key owns its voice, so several at once make a chord
+const heldVoices = new Map();
+function releaseHeld(id) {
+  const v = heldVoices.get(id);
+  heldVoices.delete(id);
+  if (v && perf.mode === 'free' && !perf.pedal) v.release();
+  else if (v && perf.pedal) pedalVoices.push(v);
+}
+const pedalVoices = [];
+function setPedal(on) {
+  perf.pedal = on;
+  $('pedalBtn').setAttribute('aria-pressed', String(on));
+  $('pedalBtn').textContent = on ? '페달 켬' : '페달 끔';
+  if (!on) { pedalVoices.splice(0).forEach((v) => v.release()); }
+}
+
+// --- keyboard + lane geometry (one octave, C to B) ---
+function kbGeom() {
+  const w = rc.clientWidth, h = rc.clientHeight;
+  const width = Math.min(w - 24, 820);
+  const left = (w - width) / 2;
+  const whiteW = width / 7;
+  const kbH = THREE.MathUtils.clamp(h * 0.42, 80, 170);
+  const kbTop = h - kbH - 6;
+  const blackW = whiteW * 0.6;
+  const blackH = kbH * 0.6;
+  const keyX = (pc) => (BLACK_AFTER[pc] !== undefined
+    ? { x: left + (BLACK_AFTER[pc] + 1) * whiteW - blackW / 2, w: blackW, black: true }
+    : { x: left + WHITE_PCS.indexOf(pc) * whiteW, w: whiteW, black: false });
+  return { w, h, width, left, whiteW, kbH, kbTop, blackW, blackH, keyX };
+}
+function keyAt(x, y) {
+  const g = kbGeom();
+  const inBlackRow = y < g.kbTop + g.blackH;
+  if (inBlackRow) {
+    for (const pc of [1, 3, 6, 8, 10]) {
+      const k = g.keyX(pc);
+      if (x >= k.x && x <= k.x + k.w) return pc;
+    }
+  }
+  const i = Math.floor((x - g.left) / g.whiteW);
+  return i >= 0 && i < 7 ? WHITE_PCS[i] : null;
+}
+
+const pointerKeys = new Map();
+rc.addEventListener('pointerdown', (e) => {
+  if (!perf.active) return;
+  const r = rc.getBoundingClientRect();
+  const pc = keyAt(e.clientX - r.left, e.clientY - r.top);
+  if (pc === null) return;
+  e.preventDefault();
+  try { rc.setPointerCapture(e.pointerId); } catch { /* capture is optional */ }
+  pointerKeys.set(e.pointerId, pc);
+  perf.keyHeld[pc]++;
+  heldVoices.set(`p${e.pointerId}`, pressKey(pc));
+});
+rc.addEventListener('pointermove', (e) => {
+  if (!pointerKeys.has(e.pointerId)) return;
+  const r = rc.getBoundingClientRect();
+  const pc = keyAt(e.clientX - r.left, e.clientY - r.top);
+  const prev = pointerKeys.get(e.pointerId);
+  if (pc === null || pc === prev) return;
+  // sliding across keys plays each one, like a glissando
+  perf.keyHeld[prev] = Math.max(0, perf.keyHeld[prev] - 1);
+  releaseHeld(`p${e.pointerId}`);
+  pointerKeys.set(e.pointerId, pc);
+  perf.keyHeld[pc]++;
+  heldVoices.set(`p${e.pointerId}`, pressKey(pc));
+});
+const releasePointer = (e) => {
+  const pc = pointerKeys.get(e.pointerId);
+  if (pc === undefined) return;
+  perf.keyHeld[pc] = Math.max(0, perf.keyHeld[pc] - 1);
+  pointerKeys.delete(e.pointerId);
+  releaseHeld(`p${e.pointerId}`);
+};
+rc.addEventListener('pointerup', releasePointer);
+rc.addEventListener('pointercancel', releasePointer);
+
+const NOTE_COLORS = { white: '#7fd0ff', black: '#ff8fb1' };
+
+function drawRhythm(now) {
+  const g = kbGeom();
+  const ctx = rctx;
+  ctx.fillStyle = '#1b2130';
+  ctx.fillRect(0, 0, g.w, g.h);
+
+  // lanes: one column per white key, darker strips over the black keys
+  for (let i = 0; i < 7; i++) {
+    const pc = WHITE_PCS[i];
+    const x = g.left + i * g.whiteW;
+    const glow = Math.max(perf.keyFlash[pc], perf.keyHeld[pc] ? 0.6 : 0);
+    ctx.fillStyle = `rgba(255,255,255,${(i % 2 ? 0.03 : 0.05) + glow * 0.12})`;
+    ctx.fillRect(x + 1, 0, g.whiteW - 2, g.kbTop);
+  }
+  for (const pc of [1, 3, 6, 8, 10]) {
+    const k = g.keyX(pc);
+    const glow = Math.max(perf.keyFlash[pc], perf.keyHeld[pc] ? 0.6 : 0);
+    ctx.fillStyle = `rgba(0,0,0,${0.22 - glow * 0.1})`;
+    ctx.fillRect(k.x, 0, k.w, g.kbTop);
+    if (glow > 0.05) { ctx.fillStyle = `rgba(255,143,177,${glow * 0.18})`; ctx.fillRect(k.x, 0, k.w, g.kbTop); }
+  }
+
+  // falling notes (white-key notes first so black-key notes sit on top)
+  if (perf.chart) {
+    const span = g.kbTop + 12;
+    for (const pass of [false, true]) {
+      for (const n of perf.chart.notes) {
+        const dt = n.t - now;
+        if (dt > perf.chart.fall) break;
+        if (dt < -0.3 || (n.done && n.done !== 'MISS')) continue;
+        const k = g.keyX(n.lane);
+        if (k.black !== pass) continue;
+        const y = g.kbTop - (dt / perf.chart.fall) * span;
+        ctx.globalAlpha = n.done === 'MISS' ? 0.25 : 1;
+        ctx.fillStyle = k.black ? NOTE_COLORS.black : NOTE_COLORS.white;
+        roundRect(ctx, k.x + 3, y - 8, k.w - 6, 16, 6);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        roundRect(ctx, k.x + 6, y - 6, k.w - 12, 4, 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  // hit line
+  ctx.fillStyle = '#f4d36b';
+  ctx.fillRect(g.left, g.kbTop - 3, g.width, 3);
+
+  // the keyboard itself
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  for (let i = 0; i < 7; i++) {
+    const pc = WHITE_PCS[i];
+    const x = g.left + i * g.whiteW;
+    const on = perf.keyFlash[pc] > 0.05 || perf.keyHeld[pc];
+    ctx.fillStyle = on ? '#bfe8ff' : '#f7f4ec';
+    roundRect(ctx, x + 1.5, g.kbTop, g.whiteW - 3, g.kbH, 6);
+    ctx.fill();
+    ctx.fillStyle = '#5b5346';
+    ctx.font = `600 ${Math.min(18, g.whiteW * 0.3)}px "Jua", sans-serif`;
+    ctx.fillText(SOLFEGE[pc], x + g.whiteW / 2, g.kbTop + g.kbH - 26);
+    ctx.font = `${Math.min(12, g.whiteW * 0.2)}px "Gowun Dodum", sans-serif`;
+    ctx.fillStyle = '#9a917f';
+    ctx.fillText(`${PC_NAMES[pc]} · ${KEY_LETTER[pc]}`, x + g.whiteW / 2, g.kbTop + g.kbH - 10);
+  }
+  for (const pc of [1, 3, 6, 8, 10]) {
+    const k = g.keyX(pc);
+    const on = perf.keyFlash[pc] > 0.05 || perf.keyHeld[pc];
+    ctx.fillStyle = on ? '#ff8fb1' : '#262a35';
+    roundRect(ctx, k.x, g.kbTop, k.w, g.blackH, 5);
+    ctx.fill();
+    ctx.fillStyle = on ? '#2a1a22' : 'rgba(255,255,255,0.55)';
+    ctx.font = `${Math.min(11, k.w * 0.28)}px "Gowun Dodum", sans-serif`;
+    ctx.fillText(KEY_LETTER[pc], k.x + k.w / 2, g.kbTop + g.blackH - 8);
+  }
+
+  // HUD
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.font = '14px "Gowun Dodum", sans-serif';
+  if (perf.chart) {
+    ctx.fillText(`${perf.chart.title} · ${perf.chart.label} · ${INSTRUMENTS[perf.instrument].label}${perf.auto ? ' · 자동' : ''}`, 14, 20);
+    ctx.font = '600 18px "Jua", sans-serif';
+    ctx.fillText(perf.score.toLocaleString(), 14, 42);
+    const prog = THREE.MathUtils.clamp(now / perf.chart.end, 0, 1);
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.fillRect(0, 0, g.w, 3);
+    ctx.fillStyle = '#f4d36b';
+    ctx.fillRect(0, 0, g.w * prog, 3);
+  }
+  if (g.h > g.w && g.w < 600) {
+    ctx.textAlign = 'center';
+    ctx.font = '12px "Gowun Dodum", sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillText('가로로 돌리면 건반이 넓어져', g.w / 2, g.kbTop - 14);
+  }
+
+  const mid = g.kbTop * 0.5;
+  ctx.textAlign = 'center';
+  if (perf.chart && now < COUNT_IN * perf.chart.spb) {
+    const n = THREE.MathUtils.clamp(Math.ceil(COUNT_IN - now / perf.chart.spb), 1, COUNT_IN);
+    ctx.font = '600 40px "Jua", sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.fillText(String(n), g.w / 2, mid);
+  }
+  if (perf.chart && perf.combo >= 2) {
+    ctx.font = '600 30px "Jua", sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillText(String(perf.combo), g.w / 2, mid - 22);
+    ctx.font = '12px "Gowun Dodum", sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillText('COMBO', g.w / 2, mid);
+  }
+  if (perf.judge && now - perf.judge.at < 0.5) {
+    const a = 1 - (now - perf.judge.at) / 0.5;
+    const colors = { PERFECT: '#ffd45e', GREAT: '#6fd3a0', GOOD: '#71b9ff', MISS: '#ff7a7a' };
+    ctx.globalAlpha = a;
+    ctx.font = `600 ${22 + (1 - a) * 6}px "Jua", sans-serif`;
+    ctx.fillStyle = colors[perf.judge.grade];
+    ctx.fillText(perf.judge.grade, g.w / 2, mid + 28);
+    ctx.globalAlpha = 1;
+  }
+  if (perf.mode === 'free' && perf.lastNote && now - perf.lastNote.at < 1) {
+    const a = 1 - (now - perf.lastNote.at);
+    const m = perf.lastNote.midi;
+    ctx.globalAlpha = a;
+    ctx.font = '600 40px "Jua", sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(`${PC_NAMES[m % 12]}${Math.floor(m / 12) - 1}`, g.w / 2, mid);
+    ctx.globalAlpha = 1;
+  }
+  if (perf.mode === 'free' && (!perf.lastNote || now - perf.lastNote.at >= 1)) {
+    ctx.font = '14px "Gowun Dodum", sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillText('연습 모드 · 건반을 눌러 자유롭게 연주해 봐', g.w / 2, mid);
+  }
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function stepPerformance(dt) {
+  const now = actx.currentTime - perf.t0;
+  perf.now = now;
+  const chart = perf.chart;
+
+  if (chart) {
+    while (perf.accompIdx < chart.accomp.length && chart.accomp[perf.accompIdx].t < now + 0.6) {
+      const a = chart.accomp[perf.accompIdx++];
+      if (a.t >= now - 0.05) playNote(a.midi, perf.t0 + Math.max(a.t, now), a.vel, a.dur);
+    }
+  }
+  if (chart && !perf.finished) {
+    for (const n of chart.notes) {
+      if (n.done) continue;
+      if (n.t - now > 0.05) break;
+      if (perf.auto) { judge(n, 'PERFECT', perf.t0 + n.t); perf.keyFlash[n.lane] = 1; continue; }
+      if (now - n.t > WINDOW.GOOD) judge(n, 'MISS');
+    }
+    if (now > chart.end) showResult();
+  }
+
+  const k = Math.min(1, dt * 9);
+  perf.handL -= perf.handL * k;
+  perf.handR -= perf.handR * k;
+  for (let i = 0; i < 12; i++) perf.keyFlash[i] -= perf.keyFlash[i] * k;
+  for (const mesh of pianoKeyMeshes.values()) {
+    mesh.userData.dip -= mesh.userData.dip * k;
+    mesh.position.y = mesh.userData.rest - mesh.userData.dip * 0.02;
+  }
+
+  // playing pose: both hands forward over the keys, striking on hits, head bobbing to the beat
+  const beatT = Math.max(0, now) / (chart ? chart.spb : 0.75);
+  const bob = reduceMotion ? 0 : Math.sin(beatT * Math.PI) * (chart ? 0.06 : 0.03);
+  player.rotation.y += (0 - player.rotation.y) * Math.min(1, dt * 10);
+  player.position.y = 0;
+  if (sample) {
+    sample.legL.rotation.x = sample.legR.rotation.x = 0;
+    sample.armL.rotation.x = -(1.25 - perf.handL * 0.4);
+    sample.armR.rotation.x = -(1.25 - perf.handR * 0.4);
+    sample.armL.rotation.z = 0.12;
+    sample.armR.rotation.z = -0.12;
+    sample.head.rotation.z = bob;
+    sample.root.position.y = Math.abs(bob) * 0.2;
+  } else if (rig) {
+    const ARM_DOWN = 1.25;
+    turnBone(rig.legL, AXIS_X, 0);
+    turnBone(rig.legR, AXIS_X, 0);
+    turnBone(rig.armL, AXIS_X, -(1.2 - perf.handL * 0.45), AXIS_Z, -ARM_DOWN);
+    turnBone(rig.armR, AXIS_X, -(1.2 - perf.handR * 0.45), AXIS_Z, ARM_DOWN);
+    turnBone(rig.spine, AXIS_Y, reduceMotion ? 0 : Math.sin(beatT * Math.PI * 0.5) * 0.06);
+    turnBone(rig.head, AXIS_Z, bob);
+    turnBone(rig.tail, AXIS_Y, reduceMotion ? 0 : Math.sin(beatT * Math.PI) * 0.3);
+    avatar.position.y = 0;
+  } else if (mixer) {
+    play(idleAction);
+    mixer.update(dt);
+  }
+
+  // three-quarter view from the front-left (the open side of the face) so the hands on the keys stay visible past the big head
+  camPos.set(player.position.x - 1.7, 1.45, player.position.z + 2.6);
+  camera.position.lerp(camPos, Math.min(1, dt * 4));
+  lookAt.set(player.position.x, 0.75, player.position.z + 0.35);
+  camera.lookAt(lookAt);
+  sun.position.set(player.position.x + 8, 14, player.position.z + 6);
+  sun.target.position.copy(player.position);
+
+  drawRhythm(now);
+}
+
 useSample();
+loadBundled();
 camera.position.set(0, camDist * 0.72, camDist * 0.78);
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05);
