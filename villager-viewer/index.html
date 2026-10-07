@@ -337,13 +337,23 @@ function setupOutfits(obj) {
   set.forEach((m, i) => {
     const opt = document.createElement('option');
     opt.value = String(i);
-    opt.textContent = m.name.split('__').slice(1).join('__');
+    opt.textContent = outfitLabel(m.name.split('__').slice(1).join('__'));
     sel.appendChild(opt);
   });
   const preferred = set.findIndex((m) => /N$/.test(m.name) && !/mydesign|emm/i.test(m.name));
   sel.value = String(preferred >= 0 ? preferred : 0);
   $('outfitField').hidden = false;
   return set;
+}
+
+// Animal Crossing clothing mesh names: <type>[mydesign|emm]<sleeve N/H/L>, e.g. TshirtsH, OnepiecemydesignN
+function outfitLabel(raw) {
+  const m = raw.match(/^(Onepiece|Tshirts)(mydesign|emm)?([NHL])?$/i);
+  if (!m) return raw;
+  const type = /onepiece/i.test(m[1]) ? '원피스' : '티셔츠';
+  const sleeve = { N: '민소매', H: '반팔', L: '긴팔' }[(m[3] || '').toUpperCase()] || '기본';
+  const extra = m[2] ? (/mydesign/i.test(m[2]) ? ' · 마이디자인용' : ' · emm') : '';
+  return `${type} · ${sleeve}${extra} (${raw})`;
 }
 
 function showOutfit(i) {
@@ -644,7 +654,11 @@ $('fileInput').addEventListener('change', (e) => { if (e.target.files.length) lo
 $('folderInput').addEventListener('change', (e) => { if (e.target.files.length) loadFiles(e.target.files); e.target.value = ''; });
 $('reset').addEventListener('click', () => { useSample(); setStatus('샘플 주민으로 돌아왔어.'); });
 $('flip').addEventListener('click', () => { turn.rotation.y = turn.rotation.y ? 0 : Math.PI; });
-$('outfitSelect').addEventListener('change', (e) => showOutfit(Number(e.target.value)));
+$('outfitSelect').addEventListener('change', (e) => {
+  showOutfit(Number(e.target.value));
+  camDist = 5.5; // the variants differ in sleeves and hem, so zoom in to show the change
+  setStatus(`옷을 ${e.target.selectedOptions[0].textContent}(으)로 바꿨어. 소매 길이랑 하의가 달라져.`);
+});
 animSelect.addEventListener('change', () => {
   if (animSelect.value === 'auto') { current = null; mixer?.stopAllAction(); play(idleAction); return; }
   const a = actions.find((x) => x.name === animSelect.value);
