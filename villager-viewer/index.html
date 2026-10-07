@@ -149,6 +149,20 @@
     color: #fff;
     border-color: rgba(255, 255, 255, 0.25);
   }
+  .octave {
+    position: absolute;
+    top: 10px; left: 12px;
+    display: flex; align-items: center; gap: 8px;
+    color: #fff;
+    font-family: var(--font-display);
+  }
+  .octave .btn { background: rgba(255, 255, 255, 0.12); color: #fff; border-color: rgba(255, 255, 255, 0.25); padding: 5px 10px; }
+  /* short landscape phones: give the keyboard more room */
+  @media (max-height: 520px) {
+    body.playing #stage { height: 40%; }
+    .rhythm { height: 60%; }
+  }
+  .sheet fieldset:disabled { opacity: 0.45; }
   .sheet {
     position: fixed;
     left: 50%; top: 50%;
@@ -236,23 +250,29 @@
 </div>
 
 <section class="sheet" id="songSheet" role="dialog" aria-modal="true" aria-labelledby="songTitle" hidden>
-  <h2 id="songTitle">연주할 곡 고르기</h2>
+  <h2 id="songTitle">연주하기</h2>
   <fieldset>
-    <legend>악보</legend>
-    <label class="choice"><input type="radio" name="song" value="canon" checked>
-      <span><strong>캐논 D장조 · 파헬벨</strong><small>♩=76 · 약 1분 · 변주 4개</small></span></label>
-  </fieldset>
-  <fieldset>
-    <legend>난이도</legend>
+    <legend>모드</legend>
     <div class="seg">
-      <label class="choice"><input type="radio" name="level" value="easy" checked> 쉬움</label>
-      <label class="choice"><input type="radio" name="level" value="normal"> 보통</label>
+      <label class="choice"><input type="radio" name="mode" value="song" checked> 악보 연주</label>
+      <label class="choice"><input type="radio" name="mode" value="free"> 연습 모드</label>
     </div>
   </fieldset>
-  <label class="choice"><input type="checkbox" id="autoPlay"> <span>자동 연주로 감상하기<small>노트를 대신 쳐줘</small></span></label>
-  <p class="note">떨어지는 노트가 노란 선에 닿을 때 D · F · J · K를 눌러. 모바일은 해당 칸을 터치하면 돼.</p>
+  <fieldset id="songFields">
+    <legend>악보</legend>
+    <label class="choice"><input type="radio" name="song" value="canon" checked>
+      <span><strong>캐논 D장조 · 파헬벨</strong><small>♩=76 · 쉬움 33 · 보통 97 · 어려움 178노트</small></span></label>
+    <legend>난이도</legend>
+    <div class="seg">
+      <label class="choice"><input type="radio" name="level" value="easy"> 쉬움</label>
+      <label class="choice"><input type="radio" name="level" value="normal" checked> 보통</label>
+      <label class="choice"><input type="radio" name="level" value="hard"> 어려움</label>
+    </div>
+    <label class="choice"><input type="checkbox" id="autoPlay"> <span>자동 연주로 감상하기<small>노트를 대신 쳐줘</small></span></label>
+  </fieldset>
+  <p class="note">건반 12개(한 옥타브). 노트가 떨어지는 건반을 노란 선에서 눌러. 키보드는 A~J가 흰건반, W·E·T·Y·U가 검은건반이야. 연습 모드에선 Z·X로 옥타브를 바꿔.</p>
   <div class="row">
-    <button class="btn primary" id="startSong" type="button">연주 시작</button>
+    <button class="btn primary" id="startSong" type="button">시작</button>
     <button class="btn" id="cancelSong" type="button">닫기</button>
   </div>
 </section>
@@ -260,6 +280,11 @@
 <div class="rhythm" id="rhythm" hidden>
   <canvas id="rhythmCanvas" aria-label="리듬 게임 노트 레인"></canvas>
   <button class="btn stop" id="stopSong" type="button">그만하기 <kbd>Esc</kbd></button>
+  <div class="octave" id="octaveBar" hidden>
+    <button class="btn" id="octDown" type="button" aria-label="옥타브 내리기">◀ <kbd>Z</kbd></button>
+    <span id="octLabel">C4</span>
+    <button class="btn" id="octUp" type="button" aria-label="옥타브 올리기"><kbd>X</kbd> ▶</button>
+  </div>
 </div>
 
 <section class="sheet" id="resultSheet" role="dialog" aria-modal="true" aria-labelledby="resultTitle" hidden>
@@ -969,15 +994,37 @@ async function loadBundled() {
   }
 }
 
-// ---------- performance mode: toy keyboard + falling-note rhythm game ----------
+// ---------- performance mode: toy keyboard + 12-key falling-note rhythm game ----------
+// Chart notes are { t, lane, midi }: the lane is the pitch class (C=0 … B=11) so a note falls onto
+// its own key, while the sound uses the stored pitch. One octave of keys plays any octave of music.
 const NOTE_INDEX = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 const midiOf = (n) => {
   const m = n.match(/^([A-G])(#?)(\d)$/);
   return 12 * (Number(m[3]) + 1) + NOTE_INDEX[m[1]] + (m[2] ? 1 : 0);
 };
 const freqOf = (midi) => 440 * Math.pow(2, (midi - 69) / 12);
+const PC_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const SOLFEGE = { 0: '도', 2: '레', 4: '미', 5: '파', 7: '솔', 9: '라', 11: '시' };
+const WHITE_PCS = [0, 2, 4, 5, 7, 9, 11];
+const BLACK_AFTER = { 1: 0, 3: 1, 6: 3, 8: 4, 10: 5 }; // black pitch class → white key index on its left
+// computer keyboard laid out like a piano: home row = white keys, row above = black keys
+const KEYMAP = { KeyA: 0, KeyW: 1, KeyS: 2, KeyE: 3, KeyD: 4, KeyF: 5, KeyT: 6, KeyG: 7, KeyY: 8, KeyH: 9, KeyU: 10, KeyJ: 11 };
+const KEY_LETTER = Object.fromEntries(Object.entries(KEYMAP).map(([k, pc]) => [pc, k.slice(3)]));
 
-// Pachelbel's Canon in D over its 8-chord ground bass (2 beats per chord, 16 beats per cycle)
+// Pachelbel's Canon in D over its 8-chord ground bass (2 beats per chord, 16 beats per cycle).
+// "A+B" is two notes struck together.
+const CANON_CYCLES = {
+  theme: { beat: 2, notes: 'F#5 E5 D5 C#5 B4 A4 B4 C#5' },
+  themeThirds: { beat: 2, notes: 'F#5+D5 E5+C#5 D5+B4 C#5+A4 B4+G4 A4+F#4 B4+G4 C#5+A4' },
+  quarters: { beat: 1, notes: 'D5 F#5 A5 G5 F#5 D5 F#5 E5 D5 B4 D5 A5 G5 B5 A5 G5' },
+  arps: { beat: 0.5, notes: 'D5 F#5 A5 F#5 C#5 E5 A5 E5 B4 D5 F#5 D5 A4 C#5 F#5 C#5 B4 D5 G5 D5 A4 D5 F#5 D5 B4 D5 G5 D5 C#5 E5 A5 E5' },
+  arpsDown: { beat: 0.5, notes: 'A5 F#5 D5 F#5 A5 E5 C#5 E5 F#5 D5 B4 D5 F#5 C#5 A4 C#5 G5 D5 B4 D5 F#5 D5 A4 D5 G5 D5 B4 D5 A5 E5 C#5 E5' },
+  runs: {
+    beat: 0.25,
+    notes: 'D5 E5 F#5 G5 A5 G5 F#5 E5 C#5 D5 E5 F#5 A5 F#5 E5 D5 B4 C#5 D5 E5 F#5 E5 D5 C#5 A4 B4 C#5 E5 F#5 E5 C#5 B4 '
+      + 'G4 A4 B4 C#5 D5 B4 G4 B4 F#4 G4 A4 B4 D5 A4 F#4 A4 G4 A4 B4 D5 G5 D5 B4 D5 A4 B4 C#5 E5 A5 E5 C#5 A4',
+  },
+};
 const SONGS = {
   canon: {
     title: '캐논 D장조',
@@ -987,42 +1034,36 @@ const SONGS = {
       ['F#4', 'A4', 'D5'], ['E4', 'A4', 'C#5'], ['F#4', 'B4', 'D5'], ['F#4', 'A4', 'C#5'],
       ['G4', 'B4', 'D5'], ['F#4', 'A4', 'D5'], ['G4', 'B4', 'D5'], ['E4', 'A4', 'C#5'],
     ],
-    cycles: [
-      { beat: 2, notes: 'F#5 E5 D5 C#5 B4 A4 B4 C#5' },
-      { beat: 1, notes: 'D5 F#5 A5 G5 F#5 D5 F#5 E5 D5 B4 D5 A5 G5 B5 A5 G5' },
-      { beat: 0.5, notes: 'D5 F#5 A5 F#5 C#5 E5 A5 E5 B4 D5 F#5 D5 A4 C#5 F#5 C#5 B4 D5 G5 D5 A4 D5 F#5 D5 B4 D5 G5 D5 C#5 E5 A5 E5' },
-      { beat: 2, notes: 'F#5 E5 D5 C#5 B4 A4 B4 C#5' },
-    ],
-    ending: 'D5',
+    levels: {
+      easy: { label: '쉬움', fall: 1.8, cycles: ['theme', 'quarters', 'theme'], ending: 'D5' },
+      normal: { label: '보통', fall: 1.35, cycles: ['theme', 'quarters', 'arps', 'arpsDown', 'theme'], ending: 'D5' },
+      hard: { label: '어려움', fall: 1.0, cycles: ['themeThirds', 'quarters', 'arps', 'runs', 'arpsDown', 'themeThirds'], ending: 'D5+F#5' },
+    },
   },
 };
 
-const COUNT_IN = 4;          // beats of clicks before the music starts
-const WINDOW = { PERFECT: 0.06, GREAT: 0.11, GOOD: 0.16 };
+const COUNT_IN = 4;
+const WINDOW = { PERFECT: 0.05, GREAT: 0.1, GOOD: 0.15 };
 const POINTS = { PERFECT: 1000, GREAT: 700, GOOD: 400, MISS: 0 };
-const LANE_KEYS = ['KeyD', 'KeyF', 'KeyJ', 'KeyK'];
-const LANE_LABELS = ['D', 'F', 'J', 'K'];
-const LANE_COLORS = ['#ff8fb1', '#ffd45e', '#6fd3a0', '#71b9ff'];
 
-function buildChart(song, level) {
+function buildChart(song, levelKey) {
+  const level = song.levels[levelKey];
   const spb = 60 / song.bpm;
   const notes = [];
   let beat = 0;
-  for (const cycle of song.cycles) {
-    for (const name of cycle.notes.split(' ')) {
-      // easy: drop the off-beat eighths so the fast variation becomes quarter notes
-      if (!(level === 'easy' && cycle.beat < 1 && beat % 1 !== 0)) {
-        notes.push({ t: (COUNT_IN + beat) * spb, midi: midiOf(name) });
-      }
-      beat += cycle.beat;
+  const push = (group, b) => {
+    for (const name of group.split('+')) {
+      const midi = midiOf(name);
+      notes.push({ t: (COUNT_IN + b) * spb, lane: midi % 12, midi });
     }
+  };
+  for (const id of level.cycles) {
+    const cycle = CANON_CYCLES[id];
+    for (const group of cycle.notes.split(' ')) { push(group, beat); beat += cycle.beat; }
   }
   const musicBeats = beat;
-  notes.push({ t: (COUNT_IN + musicBeats) * spb, midi: midiOf(song.ending) });
-
-  const lo = Math.min(...notes.map((n) => n.midi));
-  const hi = Math.max(...notes.map((n) => n.midi));
-  for (const n of notes) n.lane = Math.min(3, Math.floor(((n.midi - lo) / (hi - lo + 1)) * 4));
+  push(level.ending, musicBeats);
+  notes.sort((a, b) => a.t - b.t);
 
   const accomp = [];
   for (let b = 0; b <= musicBeats; b += 2) {
@@ -1031,11 +1072,11 @@ function buildChart(song, level) {
     const t = (COUNT_IN + b) * spb;
     accomp.push({ t, midi: midiOf(final ? 'D2' : song.bass[i]), vel: 0.22, dur: final ? 3 : spb * 2.2 });
     for (const c of final ? ['F#4', 'A4', 'D5'] : song.chords[i]) {
-      accomp.push({ t: t + 0.01, midi: midiOf(c), vel: 0.045, dur: final ? 3 : spb * 2 });
+      accomp.push({ t: t + 0.01, midi: midiOf(c), vel: 0.04, dur: final ? 3 : spb * 2 });
     }
   }
   const clicks = Array.from({ length: COUNT_IN }, (_, i) => i * spb);
-  return { notes, accomp, clicks, spb, end: (COUNT_IN + musicBeats + 4) * spb };
+  return { notes, accomp, clicks, spb, fall: level.fall, label: level.label, end: (COUNT_IN + musicBeats + 4) * spb };
 }
 
 // --- sound ---
@@ -1056,10 +1097,18 @@ function tone(freq, when, vel = 0.2, dur = 1.2, type = 'triangle') {
   o.start(when); o2.start(when);
   o.stop(when + dur + 0.05); o2.stop(when + dur + 0.05);
 }
+function ensureAudio() {
+  actx ||= new (window.AudioContext || window.webkitAudioContext)();
+  actx.resume();
+  if (master) master.disconnect();
+  master = actx.createGain();
+  master.gain.value = 0.7;
+  master.connect(actx.destination);
+}
 
-// --- the instrument: a little keyboard on a stand ---
+// --- the 3D instrument: a two-octave keyboard on a stand ---
 const piano = new THREE.Group();
-const pianoKeys = [];
+const pianoKeyMeshes = new Map(); // midi offset from C (0–23) → mesh
 {
   const wood = new THREE.MeshLambertMaterial({ color: 0xc0573e });
   const dark = new THREE.MeshLambertMaterial({ color: 0x3a2a24 });
@@ -1076,30 +1125,41 @@ const pianoKeys = [];
   const whiteMat = new THREE.MeshLambertMaterial({ color: 0xfbf8f0 });
   const blackGeo = new THREE.BoxGeometry(0.045, 0.04, 0.12);
   for (let i = 0; i < 14; i++) {
+    const octave = Math.floor(i / 7);
+    const pc = WHITE_PCS[i % 7];
     const k = new THREE.Mesh(whiteGeo, whiteMat);
     k.position.set(-0.49 + i * 0.0755, 0.575, -0.04);
     k.userData.rest = k.position.y;
+    k.userData.dip = 0;
     piano.add(k);
-    pianoKeys.push(k);
-    if (![2, 6, 9, 13].includes(i)) {
+    pianoKeyMeshes.set(octave * 12 + pc, k);
+    const blackPc = pc + 1;
+    if (BLACK_AFTER[blackPc] !== undefined) {
       const b = new THREE.Mesh(blackGeo, dark);
       b.position.set(k.position.x + 0.038, 0.6, -0.08);
+      b.userData.rest = b.position.y;
+      b.userData.dip = 0;
       piano.add(b);
+      pianoKeyMeshes.set(octave * 12 + blackPc, b);
     }
   }
   piano.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   piano.visible = false;
   scene.add(piano);
 }
+function dipPianoKey(midi) {
+  const mesh = pianoKeyMeshes.get((midi >= 72 ? 12 : 0) + (midi % 12));
+  if (mesh) mesh.userData.dip = 1;
+}
 
 // --- state ---
 const perf = {
-  active: false, song: 'canon', level: 'easy', auto: false,
-  chart: null, t0: 0, now: 0,
+  active: false, mode: 'song', song: 'canon', level: 'normal', auto: false,
+  chart: null, t0: 0, now: 0, octave: 4,
   combo: 0, maxCombo: 0, score: 0,
   counts: { PERFECT: 0, GREAT: 0, GOOD: 0, MISS: 0 },
-  judge: null, lanePress: [0, 0, 0, 0], laneHeld: [false, false, false, false],
-  handL: 0, handR: 0, keyDip: new Array(14).fill(0), finished: false,
+  judge: null, keyFlash: new Array(12).fill(0), keyHeld: new Array(12).fill(0),
+  handL: 0, handR: 0, finished: false, lastNote: null,
 };
 const rhythmEl = $('rhythm');
 const rc = $('rhythmCanvas');
@@ -1113,15 +1173,22 @@ function sizeRhythm() {
 }
 addEventListener('resize', () => { if (perf.active) sizeRhythm(); });
 
+function syncSheet() {
+  $('songFields').disabled = document.querySelector('input[name="mode"]:checked').value === 'free';
+}
+document.querySelectorAll('input[name="mode"]').forEach((r) => r.addEventListener('change', syncSheet));
+
 function openSongSheet() {
   if (perf.active) return;
   keys.clear(); target = null; marker.visible = false;
+  syncSheet();
   $('songSheet').hidden = false;
   $('startSong').focus();
 }
 $('playBtn').addEventListener('click', openSongSheet);
 $('cancelSong').addEventListener('click', () => { $('songSheet').hidden = true; });
 $('startSong').addEventListener('click', () => {
+  perf.mode = document.querySelector('input[name="mode"]:checked').value;
   perf.song = document.querySelector('input[name="song"]:checked').value;
   perf.level = document.querySelector('input[name="level"]:checked').value;
   perf.auto = $('autoPlay').checked;
@@ -1131,26 +1198,32 @@ $('startSong').addEventListener('click', () => {
 $('stopSong').addEventListener('click', () => endPerformance());
 $('againSong').addEventListener('click', () => { $('resultSheet').hidden = true; startPerformance(); });
 $('closeResult').addEventListener('click', () => { $('resultSheet').hidden = true; endPerformance(); });
+$('octDown').addEventListener('click', () => shiftOctave(-1));
+$('octUp').addEventListener('click', () => shiftOctave(1));
+function shiftOctave(d) {
+  perf.octave = THREE.MathUtils.clamp(perf.octave + d, 2, 6);
+  $('octLabel').textContent = `C${perf.octave}`;
+}
 
 function startPerformance() {
-  actx ||= new (window.AudioContext || window.webkitAudioContext)();
-  actx.resume();
-  if (master) master.disconnect();
-  master = actx.createGain();
-  master.gain.value = 0.7;
-  master.connect(actx.destination);
-
-  const chart = buildChart(SONGS[perf.song], perf.level);
+  ensureAudio();
   Object.assign(perf, {
-    active: true, chart, combo: 0, maxCombo: 0, score: 0, judge: null, finished: false,
+    active: true, combo: 0, maxCombo: 0, score: 0, judge: null, finished: false, lastNote: null,
     counts: { PERFECT: 0, GREAT: 0, GOOD: 0, MISS: 0 },
   });
-  chart.notes.forEach((n) => { n.done = null; });
   perf.t0 = actx.currentTime + 0.4;
-  for (const c of chart.clicks) tone(1568, perf.t0 + c, 0.08, 0.08, 'square');
-  for (const a of chart.accomp) tone(freqOf(a.midi), perf.t0 + a.t, a.vel, a.dur);
+  if (perf.mode === 'song') {
+    const chart = buildChart(SONGS[perf.song], perf.level);
+    perf.chart = chart;
+    chart.notes.forEach((n) => { n.done = null; });
+    for (const c of chart.clicks) tone(1568, perf.t0 + c, 0.08, 0.08, 'square');
+    for (const a of chart.accomp) tone(freqOf(a.midi), perf.t0 + a.t, a.vel, a.dur);
+  } else {
+    perf.chart = null;
+  }
+  $('octaveBar').hidden = perf.mode !== 'free';
+  $('octLabel').textContent = `C${perf.octave}`;
 
-  // face the camera and set the keyboard in front of the character
   player.rotation.y = 0;
   piano.position.set(player.position.x, 0, player.position.z + 0.62);
   piano.visible = true;
@@ -1170,6 +1243,7 @@ function endPerformance() {
     master = null;
   }
   perf.active = false;
+  perf.keyHeld.fill(0);
   piano.visible = false;
   rhythmEl.hidden = true;
   $('resultSheet').hidden = true;
@@ -1189,40 +1263,45 @@ function showResult() {
   $('resGreat').textContent = c.GREAT;
   $('resGood').textContent = c.GOOD;
   $('resMiss').textContent = c.MISS;
-  $('resCombo').textContent = `최대 콤보 ${perf.maxCombo} · 점수 ${perf.score.toLocaleString()}${perf.auto ? ' · 자동 연주' : ''}`;
+  $('resCombo').textContent = `${perf.chart.label} · 노트 ${total}개 · 최대 콤보 ${perf.maxCombo} · 점수 ${perf.score.toLocaleString()}${perf.auto ? ' · 자동 연주' : ''}`;
   $('resultSheet').hidden = false;
+}
+
+function strike(midi, when) {
+  tone(freqOf(midi), when ?? actx.currentTime, 0.22, 1.3);
+  dipPianoKey(midi);
+  // keys below F strike with the left hand, F and up with the right
+  if (midi % 12 < 5) perf.handL = 1; else perf.handR = 1;
+  perf.lastNote = { midi, at: perf.now };
 }
 
 function judge(n, grade, when) {
   n.done = grade;
   perf.counts[grade]++;
   perf.score += POINTS[grade];
-  if (grade === 'MISS') {
-    perf.combo = 0;
-  } else {
-    perf.combo++;
-    perf.maxCombo = Math.max(perf.maxCombo, perf.combo);
-    tone(freqOf(n.midi), when ?? actx.currentTime, 0.22, 1.3);
-    // left two lanes strike with the left hand, right two with the right
-    if (n.lane < 2) perf.handL = 1; else perf.handR = 1;
-    const key = Math.round(((n.midi - 69) / 14) * 13);
-    perf.keyDip[THREE.MathUtils.clamp(key, 0, 13)] = 1;
-  }
+  if (grade === 'MISS') { perf.combo = 0; perf.judge = { grade, at: perf.now }; return; }
+  perf.combo++;
+  perf.maxCombo = Math.max(perf.maxCombo, perf.combo);
+  strike(n.midi, when);
   perf.judge = { grade, at: perf.now };
 }
 
-function pressLane(lane) {
-  perf.lanePress[lane] = 1;
+// a key with no note under it still sounds, near the melody range
+const freeMidi = (pc) => (pc >= 9 ? 69 + (pc - 9) : 72 + pc);
+
+function pressKey(pc) {
+  perf.keyFlash[pc] = 1;
+  if (perf.mode === 'free') { strike(12 * (perf.octave + 1) + pc); return; }
   if (perf.auto || perf.finished) return;
   const now = actx.currentTime - perf.t0;
   let best = null;
   for (const n of perf.chart.notes) {
-    if (n.done || n.lane !== lane) continue;
+    if (n.t - now > WINDOW.GOOD) break;
+    if (n.done || n.lane !== pc) continue;
     const d = Math.abs(n.t - now);
     if (d <= WINDOW.GOOD && (!best || d < Math.abs(best.t - now))) best = n;
-    if (n.t - now > WINDOW.GOOD) break;
   }
-  if (!best) return;
+  if (!best) { strike(freeMidi(pc)); return; }
   const d = Math.abs(best.t - now);
   judge(best, d <= WINDOW.PERFECT ? 'PERFECT' : d <= WINDOW.GREAT ? 'GREAT' : 'GOOD');
 }
@@ -1233,139 +1312,225 @@ function perfKeydown(e) {
     return true; // no walking or jumping behind the dialog
   }
   if (!perf.active) {
-    if (e.code === 'KeyP' && !e.repeat && $('songSheet').hidden) { openSongSheet(); return true; }
+    if (e.code === 'KeyP' && !e.repeat) { openSongSheet(); return true; }
     return false;
   }
+  if (e.target.closest && e.target.closest('button') && (e.code === 'Space' || e.code === 'Enter')) return true;
   e.preventDefault();
   if (e.code === 'Escape') { endPerformance(); return true; }
-  const lane = LANE_KEYS.indexOf(e.code);
-  if (lane >= 0 && !e.repeat) { perf.laneHeld[lane] = true; pressLane(lane); }
+  if (perf.mode === 'free' && !e.repeat) {
+    if (e.code === 'KeyZ') { shiftOctave(-1); return true; }
+    if (e.code === 'KeyX') { shiftOctave(1); return true; }
+  }
+  const pc = KEYMAP[e.code];
+  if (pc !== undefined && !e.repeat) { perf.keyHeld[pc]++; pressKey(pc); }
   return true;
 }
 function perfKeyup(e) {
-  const lane = LANE_KEYS.indexOf(e.code);
-  if (lane >= 0) perf.laneHeld[lane] = false;
+  const pc = KEYMAP[e.code];
+  if (pc !== undefined) perf.keyHeld[pc] = Math.max(0, perf.keyHeld[pc] - 1);
 }
 
-function laneGeometry() {
+// --- keyboard + lane geometry (one octave, C to B) ---
+function kbGeom() {
   const w = rc.clientWidth, h = rc.clientHeight;
-  const laneW = Math.min(110, (w - 32) / 4);
-  const left = (w - laneW * 4) / 2;
-  return { w, h, laneW, left, hitY: h - 64 };
+  const width = Math.min(w - 24, 820);
+  const left = (w - width) / 2;
+  const whiteW = width / 7;
+  const kbH = THREE.MathUtils.clamp(h * 0.42, 80, 170);
+  const kbTop = h - kbH - 6;
+  const blackW = whiteW * 0.6;
+  const blackH = kbH * 0.6;
+  const keyX = (pc) => (BLACK_AFTER[pc] !== undefined
+    ? { x: left + (BLACK_AFTER[pc] + 1) * whiteW - blackW / 2, w: blackW, black: true }
+    : { x: left + WHITE_PCS.indexOf(pc) * whiteW, w: whiteW, black: false });
+  return { w, h, width, left, whiteW, kbH, kbTop, blackW, blackH, keyX };
 }
+function keyAt(x, y) {
+  const g = kbGeom();
+  const inBlackRow = y < g.kbTop + g.blackH;
+  if (inBlackRow) {
+    for (const pc of [1, 3, 6, 8, 10]) {
+      const k = g.keyX(pc);
+      if (x >= k.x && x <= k.x + k.w) return pc;
+    }
+  }
+  const i = Math.floor((x - g.left) / g.whiteW);
+  return i >= 0 && i < 7 ? WHITE_PCS[i] : null;
+}
+
+const pointerKeys = new Map();
 rc.addEventListener('pointerdown', (e) => {
   if (!perf.active) return;
   const r = rc.getBoundingClientRect();
-  const { laneW, left } = laneGeometry();
-  const lane = Math.floor((e.clientX - r.left - left) / laneW);
-  if (lane < 0 || lane > 3) return;
+  const pc = keyAt(e.clientX - r.left, e.clientY - r.top);
+  if (pc === null) return;
   e.preventDefault();
   rc.setPointerCapture?.(e.pointerId);
-  perf.laneHeld[lane] = true;
-  e.target.dataset[`p${e.pointerId}`] = lane;
-  pressLane(lane);
+  pointerKeys.set(e.pointerId, pc);
+  perf.keyHeld[pc]++;
+  pressKey(pc);
+});
+rc.addEventListener('pointermove', (e) => {
+  if (!pointerKeys.has(e.pointerId)) return;
+  const r = rc.getBoundingClientRect();
+  const pc = keyAt(e.clientX - r.left, e.clientY - r.top);
+  const prev = pointerKeys.get(e.pointerId);
+  if (pc === null || pc === prev) return;
+  // sliding across keys plays each one, like a glissando
+  perf.keyHeld[prev] = Math.max(0, perf.keyHeld[prev] - 1);
+  pointerKeys.set(e.pointerId, pc);
+  perf.keyHeld[pc]++;
+  pressKey(pc);
 });
 const releasePointer = (e) => {
-  const lane = e.target.dataset?.[`p${e.pointerId}`];
-  if (lane !== undefined) { perf.laneHeld[Number(lane)] = false; delete e.target.dataset[`p${e.pointerId}`]; }
+  const pc = pointerKeys.get(e.pointerId);
+  if (pc === undefined) return;
+  perf.keyHeld[pc] = Math.max(0, perf.keyHeld[pc] - 1);
+  pointerKeys.delete(e.pointerId);
 };
 rc.addEventListener('pointerup', releasePointer);
 rc.addEventListener('pointercancel', releasePointer);
 
-function drawRhythm(now, fall) {
-  const { w, h, laneW, left, hitY } = laneGeometry();
+const NOTE_COLORS = { white: '#7fd0ff', black: '#ff8fb1' };
+
+function drawRhythm(now) {
+  const g = kbGeom();
   const ctx = rctx;
-  ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = '#1b2130';
-  ctx.fillRect(0, 0, w, h);
+  ctx.fillRect(0, 0, g.w, g.h);
 
-  for (let i = 0; i < 4; i++) {
-    const x = left + i * laneW;
-    const glow = Math.max(perf.lanePress[i], perf.laneHeld[i] ? 0.6 : 0);
-    const grad = ctx.createLinearGradient(0, 0, 0, hitY);
-    grad.addColorStop(0, 'rgba(255,255,255,0.02)');
-    grad.addColorStop(1, `rgba(255,255,255,${0.05 + glow * 0.18})`);
-    ctx.fillStyle = grad;
-    ctx.fillRect(x + 2, 0, laneW - 4, hitY);
-    ctx.fillStyle = 'rgba(255,255,255,0.08)';
-    ctx.fillRect(x, 0, 1, h);
+  // lanes: one column per white key, darker strips over the black keys
+  for (let i = 0; i < 7; i++) {
+    const pc = WHITE_PCS[i];
+    const x = g.left + i * g.whiteW;
+    const glow = Math.max(perf.keyFlash[pc], perf.keyHeld[pc] ? 0.6 : 0);
+    ctx.fillStyle = `rgba(255,255,255,${(i % 2 ? 0.03 : 0.05) + glow * 0.12})`;
+    ctx.fillRect(x + 1, 0, g.whiteW - 2, g.kbTop);
   }
-  ctx.fillStyle = 'rgba(255,255,255,0.08)';
-  ctx.fillRect(left + laneW * 4, 0, 1, h);
-
-  // falling notes
-  const span = hitY + 20;
-  for (const n of perf.chart.notes) {
-    if (n.done && n.done !== 'MISS') continue;
-    const dt = n.t - now;
-    if (dt > fall) break;
-    if (dt < -0.3) continue;
-    const y = hitY - (dt / fall) * span;
-    const x = left + n.lane * laneW;
-    ctx.globalAlpha = n.done === 'MISS' ? 0.25 : 1;
-    ctx.fillStyle = LANE_COLORS[n.lane];
-    roundRect(ctx, x + 6, y - 9, laneW - 12, 18, 7);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    roundRect(ctx, x + 10, y - 7, laneW - 20, 5, 3);
-    ctx.fill();
-    ctx.globalAlpha = 1;
+  for (const pc of [1, 3, 6, 8, 10]) {
+    const k = g.keyX(pc);
+    const glow = Math.max(perf.keyFlash[pc], perf.keyHeld[pc] ? 0.6 : 0);
+    ctx.fillStyle = `rgba(0,0,0,${0.22 - glow * 0.1})`;
+    ctx.fillRect(k.x, 0, k.w, g.kbTop);
+    if (glow > 0.05) { ctx.fillStyle = `rgba(255,143,177,${glow * 0.18})`; ctx.fillRect(k.x, 0, k.w, g.kbTop); }
   }
 
-  // hit line and key caps
+  // falling notes (white-key notes first so black-key notes sit on top)
+  if (perf.chart) {
+    const span = g.kbTop + 12;
+    for (const pass of [false, true]) {
+      for (const n of perf.chart.notes) {
+        const dt = n.t - now;
+        if (dt > perf.chart.fall) break;
+        if (dt < -0.3 || (n.done && n.done !== 'MISS')) continue;
+        const k = g.keyX(n.lane);
+        if (k.black !== pass) continue;
+        const y = g.kbTop - (dt / perf.chart.fall) * span;
+        ctx.globalAlpha = n.done === 'MISS' ? 0.25 : 1;
+        ctx.fillStyle = k.black ? NOTE_COLORS.black : NOTE_COLORS.white;
+        roundRect(ctx, k.x + 3, y - 8, k.w - 6, 16, 6);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        roundRect(ctx, k.x + 6, y - 6, k.w - 12, 4, 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  // hit line
   ctx.fillStyle = '#f4d36b';
-  ctx.fillRect(left, hitY - 2, laneW * 4, 4);
-  ctx.font = '600 16px "Jua", sans-serif';
+  ctx.fillRect(g.left, g.kbTop - 3, g.width, 3);
+
+  // the keyboard itself
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  for (let i = 0; i < 4; i++) {
-    const x = left + i * laneW;
-    const on = perf.lanePress[i] > 0.05 || perf.laneHeld[i];
-    ctx.fillStyle = on ? LANE_COLORS[i] : 'rgba(255,255,255,0.1)';
-    roundRect(ctx, x + 6, hitY + 12, laneW - 12, 40, 10);
+  ctx.textBaseline = 'alphabetic';
+  for (let i = 0; i < 7; i++) {
+    const pc = WHITE_PCS[i];
+    const x = g.left + i * g.whiteW;
+    const on = perf.keyFlash[pc] > 0.05 || perf.keyHeld[pc];
+    ctx.fillStyle = on ? '#bfe8ff' : '#f7f4ec';
+    roundRect(ctx, x + 1.5, g.kbTop, g.whiteW - 3, g.kbH, 6);
     ctx.fill();
-    ctx.fillStyle = on ? '#1b2130' : 'rgba(255,255,255,0.75)';
-    ctx.fillText(LANE_LABELS[i], x + laneW / 2, hitY + 32);
+    ctx.fillStyle = '#5b5346';
+    ctx.font = `600 ${Math.min(18, g.whiteW * 0.3)}px "Jua", sans-serif`;
+    ctx.fillText(SOLFEGE[pc], x + g.whiteW / 2, g.kbTop + g.kbH - 26);
+    ctx.font = `${Math.min(12, g.whiteW * 0.2)}px "Gowun Dodum", sans-serif`;
+    ctx.fillStyle = '#9a917f';
+    ctx.fillText(`${PC_NAMES[pc]} · ${KEY_LETTER[pc]}`, x + g.whiteW / 2, g.kbTop + g.kbH - 10);
+  }
+  for (const pc of [1, 3, 6, 8, 10]) {
+    const k = g.keyX(pc);
+    const on = perf.keyFlash[pc] > 0.05 || perf.keyHeld[pc];
+    ctx.fillStyle = on ? '#ff8fb1' : '#262a35';
+    roundRect(ctx, k.x, g.kbTop, k.w, g.blackH, 5);
+    ctx.fill();
+    ctx.fillStyle = on ? '#2a1a22' : 'rgba(255,255,255,0.55)';
+    ctx.font = `${Math.min(11, k.w * 0.28)}px "Gowun Dodum", sans-serif`;
+    ctx.fillText(KEY_LETTER[pc], k.x + k.w / 2, g.kbTop + g.blackH - 8);
   }
 
   // HUD
   ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
   ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  ctx.font = '15px "Gowun Dodum", sans-serif';
-  ctx.fillText(`${SONGS[perf.song].title} · ${perf.level === 'easy' ? '쉬움' : '보통'}${perf.auto ? ' · 자동' : ''}`, 14, 22);
-  ctx.font = '600 18px "Jua", sans-serif';
-  ctx.fillText(perf.score.toLocaleString(), 14, 46);
-  const prog = THREE.MathUtils.clamp(now / perf.chart.end, 0, 1);
-  ctx.fillStyle = 'rgba(255,255,255,0.12)';
-  ctx.fillRect(0, 0, w, 3);
-  ctx.fillStyle = '#f4d36b';
-  ctx.fillRect(0, 0, w * prog, 3);
-
-  if (now < 0 || now < COUNT_IN * perf.chart.spb) {
-    const left4 = Math.ceil(COUNT_IN - now / perf.chart.spb);
-    ctx.textAlign = 'center';
-    ctx.font = '600 44px "Jua", sans-serif';
-    ctx.fillStyle = 'rgba(255,255,255,0.9)';
-    ctx.fillText(String(THREE.MathUtils.clamp(left4, 1, COUNT_IN)), w / 2, hitY * 0.45);
+  ctx.font = '14px "Gowun Dodum", sans-serif';
+  if (perf.chart) {
+    ctx.fillText(`${SONGS[perf.song].title} · ${perf.chart.label}${perf.auto ? ' · 자동' : ''}`, 14, 20);
+    ctx.font = '600 18px "Jua", sans-serif';
+    ctx.fillText(perf.score.toLocaleString(), 14, 42);
+    const prog = THREE.MathUtils.clamp(now / perf.chart.end, 0, 1);
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.fillRect(0, 0, g.w, 3);
+    ctx.fillStyle = '#f4d36b';
+    ctx.fillRect(0, 0, g.w * prog, 3);
   }
-  if (perf.combo >= 2) {
+  if (g.h > g.w && g.w < 600) {
     ctx.textAlign = 'center';
-    ctx.font = '600 36px "Jua", sans-serif';
+    ctx.font = '12px "Gowun Dodum", sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillText('가로로 돌리면 건반이 넓어져', g.w / 2, g.kbTop - 14);
+  }
+
+  const mid = g.kbTop * 0.5;
+  ctx.textAlign = 'center';
+  if (perf.chart && now < COUNT_IN * perf.chart.spb) {
+    const n = THREE.MathUtils.clamp(Math.ceil(COUNT_IN - now / perf.chart.spb), 1, COUNT_IN);
+    ctx.font = '600 40px "Jua", sans-serif';
     ctx.fillStyle = 'rgba(255,255,255,0.9)';
-    ctx.fillText(String(perf.combo), w / 2, hitY * 0.32);
-    ctx.font = '13px "Gowun Dodum", sans-serif';
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
-    ctx.fillText('COMBO', w / 2, hitY * 0.32 + 26);
+    ctx.fillText(String(n), g.w / 2, mid);
+  }
+  if (perf.chart && perf.combo >= 2) {
+    ctx.font = '600 30px "Jua", sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillText(String(perf.combo), g.w / 2, mid - 22);
+    ctx.font = '12px "Gowun Dodum", sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillText('COMBO', g.w / 2, mid);
   }
   if (perf.judge && now - perf.judge.at < 0.5) {
     const a = 1 - (now - perf.judge.at) / 0.5;
     const colors = { PERFECT: '#ffd45e', GREAT: '#6fd3a0', GOOD: '#71b9ff', MISS: '#ff7a7a' };
     ctx.globalAlpha = a;
-    ctx.textAlign = 'center';
-    ctx.font = `600 ${26 + (1 - a) * 6}px "Jua", sans-serif`;
+    ctx.font = `600 ${22 + (1 - a) * 6}px "Jua", sans-serif`;
     ctx.fillStyle = colors[perf.judge.grade];
-    ctx.fillText(perf.judge.grade, w / 2, hitY * 0.62);
+    ctx.fillText(perf.judge.grade, g.w / 2, mid + 28);
     ctx.globalAlpha = 1;
+  }
+  if (perf.mode === 'free' && perf.lastNote && now - perf.lastNote.at < 1) {
+    const a = 1 - (now - perf.lastNote.at);
+    const m = perf.lastNote.midi;
+    ctx.globalAlpha = a;
+    ctx.font = '600 40px "Jua", sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(`${PC_NAMES[m % 12]}${Math.floor(m / 12) - 1}`, g.w / 2, mid);
+    ctx.globalAlpha = 1;
+  }
+  if (perf.mode === 'free' && (!perf.lastNote || now - perf.lastNote.at >= 1)) {
+    ctx.font = '14px "Gowun Dodum", sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillText('연습 모드 · 건반을 눌러 자유롭게 연주해 봐', g.w / 2, mid);
   }
 }
 
@@ -1383,31 +1548,29 @@ function stepPerformance(dt) {
   const now = actx.currentTime - perf.t0;
   perf.now = now;
   const chart = perf.chart;
-  const fall = perf.level === 'easy' ? 1.9 : 1.5;
 
-  if (!perf.finished) {
+  if (chart && !perf.finished) {
     for (const n of chart.notes) {
       if (n.done) continue;
       if (n.t - now > 0.05) break;
-      if (perf.auto) { judge(n, 'PERFECT', perf.t0 + n.t); perf.lanePress[n.lane] = 1; continue; }
+      if (perf.auto) { judge(n, 'PERFECT', perf.t0 + n.t); perf.keyFlash[n.lane] = 1; continue; }
       if (now - n.t > WINDOW.GOOD) judge(n, 'MISS');
     }
     if (now > chart.end) showResult();
   }
 
-  // decay hand/key/lane flashes
   const k = Math.min(1, dt * 9);
   perf.handL -= perf.handL * k;
   perf.handR -= perf.handR * k;
-  for (let i = 0; i < 4; i++) perf.lanePress[i] -= perf.lanePress[i] * k;
-  pianoKeys.forEach((key, i) => {
-    perf.keyDip[i] -= perf.keyDip[i] * k;
-    key.position.y = key.userData.rest - perf.keyDip[i] * 0.02;
-  });
+  for (let i = 0; i < 12; i++) perf.keyFlash[i] -= perf.keyFlash[i] * k;
+  for (const mesh of pianoKeyMeshes.values()) {
+    mesh.userData.dip -= mesh.userData.dip * k;
+    mesh.position.y = mesh.userData.rest - mesh.userData.dip * 0.02;
+  }
 
   // playing pose: both hands forward over the keys, striking on hits, head bobbing to the beat
-  const beatT = Math.max(0, now) / chart.spb;
-  const bob = reduceMotion ? 0 : Math.sin(beatT * Math.PI) * 0.06;
+  const beatT = Math.max(0, now) / (chart ? chart.spb : 0.75);
+  const bob = reduceMotion ? 0 : Math.sin(beatT * Math.PI) * (chart ? 0.06 : 0.03);
   player.rotation.y += (0 - player.rotation.y) * Math.min(1, dt * 10);
   player.position.y = 0;
   if (sample) {
@@ -1441,7 +1604,7 @@ function stepPerformance(dt) {
   sun.position.set(player.position.x + 8, 14, player.position.z + 6);
   sun.target.position.copy(player.position);
 
-  drawRhythm(now, fall);
+  drawRhythm(now);
 }
 
 useSample();
