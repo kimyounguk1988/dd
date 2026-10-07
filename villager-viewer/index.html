@@ -270,7 +270,8 @@
     </div>
     <label class="choice"><input type="checkbox" id="autoPlay"> <span>자동 연주로 감상하기<small>노트를 대신 쳐줘</small></span></label>
   </fieldset>
-  <p class="note">건반 12개(한 옥타브). 노트가 떨어지는 건반을 노란 선에서 눌러. 키보드는 A~J가 흰건반, W·E·T·Y·U가 검은건반이야. 연습 모드에선 Z·X로 옥타브를 바꿔.</p>
+  <p class="note">피아노 소리: Salamander Grand Piano (Alexander Holm, CC BY 3.0)</p>
+  <p class="note">건반 12개(한 옥타브). 노트가 떨어지는 건반을 노란 선에서 눌러. 키보드는 A~J가 흰건반, W·E·T·Y·U가 검은건반이야. 연습 모드에선 Z·X로 옥타브, Space로 페달.</p>
   <div class="row">
     <button class="btn primary" id="startSong" type="button">시작</button>
     <button class="btn" id="cancelSong" type="button">닫기</button>
@@ -284,6 +285,7 @@
     <button class="btn" id="octDown" type="button" aria-label="옥타브 내리기">◀ <kbd>Z</kbd></button>
     <span id="octLabel">C4</span>
     <button class="btn" id="octUp" type="button" aria-label="옥타브 올리기"><kbd>X</kbd> ▶</button>
+    <button class="btn" id="pedalBtn" type="button" aria-pressed="false" title="서스테인 페달 (Space)">페달 끔</button>
   </div>
 </div>
 
@@ -1070,9 +1072,9 @@ function buildChart(song, levelKey) {
     const i = (b / 2) % 8;
     const final = b === musicBeats;
     const t = (COUNT_IN + b) * spb;
-    accomp.push({ t, midi: midiOf(final ? 'D2' : song.bass[i]), vel: 0.22, dur: final ? 3 : spb * 2.2 });
+    accomp.push({ t, midi: midiOf(final ? 'D2' : song.bass[i]), vel: 0.5, dur: final ? 3 : spb * 2 });
     for (const c of final ? ['F#4', 'A4', 'D5'] : song.chords[i]) {
-      accomp.push({ t: t + 0.01, midi: midiOf(c), vel: 0.04, dur: final ? 3 : spb * 2 });
+      accomp.push({ t: t + 0.01, midi: midiOf(c), vel: 0.16, dur: final ? 3 : spb * 1.9 });
     }
   }
   const clicks = Array.from({ length: COUNT_IN }, (_, i) => i * spb);
@@ -1080,30 +1082,117 @@ function buildChart(song, levelKey) {
 }
 
 // --- sound ---
+// Piano: Salamander Grand Piano samples (Alexander Holm, CC BY 3.0) recorded every minor third,
+// pitch-shifted to the notes in between. Until they load (or if they can't), a simple synth plays.
 let actx = null;
-let master = null;
-function tone(freq, when, vel = 0.2, dur = 1.2, type = 'triangle') {
-  const o = actx.createOscillator();
-  const o2 = actx.createOscillator();
-  const g = actx.createGain();
-  const g2 = actx.createGain();
-  o.type = type; o.frequency.value = freq;
-  o2.type = 'sine'; o2.frequency.value = freq * 2;
-  g2.gain.value = 0.25;
-  o.connect(g); o2.connect(g2); g2.connect(g); g.connect(master);
-  g.gain.setValueAtTime(0.0001, when);
-  g.gain.linearRampToValueAtTime(vel, when + 0.006);
-  g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
-  o.start(when); o2.start(when);
-  o.stop(when + dur + 0.05); o2.stop(when + dur + 0.05);
+let master = null;   // per-session gain, cut when a performance ends
+let bus = null;      // compressor + light reverb shared by every session
+const SAMPLE_ROOTS = [];
+for (let o = 2; o <= 6; o++) for (const [n, pc] of [['C', 0], ['Ds', 3], ['Fs', 6], ['A', 9]]) SAMPLE_ROOTS.push({ file: `${n}${o}`, midi: 12 * (o + 1) + pc });
+SAMPLE_ROOTS.push({ file: 'C7', midi: 96 });
+const pianoBuffers = new Map(); // root midi → AudioBuffer
+let samplesLoading = null;
+
+function initAudio() {
+  if (!actx) {
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    const comp = actx.createDynamicsCompressor();
+    comp.threshold.value = -14;
+    comp.ratio.value = 4;
+    // small synthetic room: decaying noise as an impulse response
+    const len = Math.floor(actx.sampleRate * 1.6);
+    const ir = actx.createBuffer(2, len, actx.sampleRate);
+    for (let c = 0; c < 2; c++) {
+      const d = ir.getChannelData(c);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+    }
+    const verb = actx.createConvolver();
+    verb.buffer = ir;
+    const wet = actx.createGain();
+    wet.gain.value = 0.18;
+    bus = actx.createGain();
+    bus.connect(comp);
+    bus.connect(verb); verb.connect(wet); wet.connect(comp);
+    comp.connect(actx.destination);
+  }
+  actx.resume();
+  samplesLoading ||= Promise.all(SAMPLE_ROOTS.map(async ({ file, midi }) => {
+    try {
+      const res = await fetch(`samples/salamander/${file}.mp3`);
+      if (!res.ok) return;
+      pianoBuffers.set(midi, await actx.decodeAudioData(await res.arrayBuffer()));
+    } catch { /* missing sample: that range falls back to the nearest loaded one or the synth */ }
+  }));
+  return samplesLoading;
 }
 function ensureAudio() {
-  actx ||= new (window.AudioContext || window.webkitAudioContext)();
-  actx.resume();
+  initAudio();
   if (master) master.disconnect();
   master = actx.createGain();
-  master.gain.value = 0.7;
-  master.connect(actx.destination);
+  master.gain.value = 0.9;
+  master.connect(bus);
+}
+
+function nearestRoot(midi) {
+  let best = null;
+  for (const root of pianoBuffers.keys()) if (best === null || Math.abs(root - midi) < Math.abs(best - midi)) best = root;
+  return best;
+}
+
+// Starts a note and returns a voice whose release() lets it fade like a piano damper.
+// With dur, the note releases on its own after that many seconds.
+function playNote(midi, when = actx.currentTime, vel = 0.8, dur = null) {
+  const g = actx.createGain();
+  g.connect(master);
+  const root = nearestRoot(midi);
+  let stopAt = Infinity;
+  let src;
+  if (root !== null) {
+    src = actx.createBufferSource();
+    src.buffer = pianoBuffers.get(root);
+    src.playbackRate.value = Math.pow(2, (midi - root) / 12);
+    g.gain.setValueAtTime(vel, when);
+    src.connect(g);
+    src.start(when);
+  } else {
+    src = actx.createOscillator();
+    src.type = 'triangle';
+    src.frequency.value = freqOf(midi);
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.linearRampToValueAtTime(vel * 0.3, when + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + 1.6);
+    src.connect(g);
+    src.start(when);
+    stopAt = when + 1.7;
+    src.stop(stopAt);
+  }
+  const voice = {
+    released: false,
+    release(at = actx.currentTime) {
+      if (voice.released) return;
+      voice.released = true;
+      const t = Math.max(at, when);
+      if (g.gain.cancelAndHoldAtTime) g.gain.cancelAndHoldAtTime(t);
+      else { g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(vel, t); }
+      g.gain.setTargetAtTime(0, t, 0.12);
+      if (t + 1 < stopAt) src.stop(t + 1);
+    },
+  };
+  if (dur) voice.release(when + dur);
+  return voice;
+}
+
+// metronome click and other non-piano blips
+function tone(freq, when, vel = 0.2, dur = 1.2, type = 'triangle') {
+  const o = actx.createOscillator();
+  const g = actx.createGain();
+  o.type = type; o.frequency.value = freq;
+  o.connect(g); g.connect(master);
+  g.gain.setValueAtTime(0.0001, when);
+  g.gain.linearRampToValueAtTime(vel, when + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+  o.start(when);
+  o.stop(when + dur + 0.05);
 }
 
 // --- the 3D instrument: a two-octave keyboard on a stand ---
@@ -1182,6 +1271,7 @@ function openSongSheet() {
   if (perf.active) return;
   keys.clear(); target = null; marker.visible = false;
   syncSheet();
+  initAudio();
   $('songSheet').hidden = false;
   $('startSong').focus();
 }
@@ -1200,6 +1290,7 @@ $('againSong').addEventListener('click', () => { $('resultSheet').hidden = true;
 $('closeResult').addEventListener('click', () => { $('resultSheet').hidden = true; endPerformance(); });
 $('octDown').addEventListener('click', () => shiftOctave(-1));
 $('octUp').addEventListener('click', () => shiftOctave(1));
+$('pedalBtn').addEventListener('click', (e) => { setPedal(!perf.pedal); e.currentTarget.blur(); });
 function shiftOctave(d) {
   perf.octave = THREE.MathUtils.clamp(perf.octave + d, 2, 6);
   $('octLabel').textContent = `C${perf.octave}`;
@@ -1217,11 +1308,12 @@ function startPerformance() {
     perf.chart = chart;
     chart.notes.forEach((n) => { n.done = null; });
     for (const c of chart.clicks) tone(1568, perf.t0 + c, 0.08, 0.08, 'square');
-    for (const a of chart.accomp) tone(freqOf(a.midi), perf.t0 + a.t, a.vel, a.dur);
+    for (const a of chart.accomp) playNote(a.midi, perf.t0 + a.t, a.vel, a.dur);
   } else {
     perf.chart = null;
   }
   $('octaveBar').hidden = perf.mode !== 'free';
+  setPedal(false);
   $('octLabel').textContent = `C${perf.octave}`;
 
   player.rotation.y = 0;
@@ -1244,6 +1336,9 @@ function endPerformance() {
   }
   perf.active = false;
   perf.keyHeld.fill(0);
+  heldVoices.clear();
+  pedalVoices.length = 0;
+  perf.pedal = false;
   piano.visible = false;
   rhythmEl.hidden = true;
   $('resultSheet').hidden = true;
@@ -1267,12 +1362,13 @@ function showResult() {
   $('resultSheet').hidden = false;
 }
 
-function strike(midi, when) {
-  tone(freqOf(midi), when ?? actx.currentTime, 0.22, 1.3);
+function strike(midi, when, held = false) {
+  const voice = playNote(midi, when ?? actx.currentTime, 0.85, held ? null : 1.4);
   dipPianoKey(midi);
   // keys below F strike with the left hand, F and up with the right
   if (midi % 12 < 5) perf.handL = 1; else perf.handR = 1;
   perf.lastNote = { midi, at: perf.now };
+  return voice;
 }
 
 function judge(n, grade, when) {
@@ -1282,17 +1378,18 @@ function judge(n, grade, when) {
   if (grade === 'MISS') { perf.combo = 0; perf.judge = { grade, at: perf.now }; return; }
   perf.combo++;
   perf.maxCombo = Math.max(perf.maxCombo, perf.combo);
-  strike(n.midi, when);
   perf.judge = { grade, at: perf.now };
+  return strike(n.midi, when);
 }
 
 // a key with no note under it still sounds, near the melody range
 const freeMidi = (pc) => (pc >= 9 ? 69 + (pc - 9) : 72 + pc);
 
+// returns the voice it started so the caller can release it when the finger lifts
 function pressKey(pc) {
   perf.keyFlash[pc] = 1;
-  if (perf.mode === 'free') { strike(12 * (perf.octave + 1) + pc); return; }
-  if (perf.auto || perf.finished) return;
+  if (perf.mode === 'free') return strike(12 * (perf.octave + 1) + pc, undefined, true);
+  if (perf.auto || perf.finished) return null;
   const now = actx.currentTime - perf.t0;
   let best = null;
   for (const n of perf.chart.notes) {
@@ -1301,9 +1398,9 @@ function pressKey(pc) {
     const d = Math.abs(n.t - now);
     if (d <= WINDOW.GOOD && (!best || d < Math.abs(best.t - now))) best = n;
   }
-  if (!best) { strike(freeMidi(pc)); return; }
+  if (!best) return strike(freeMidi(pc));
   const d = Math.abs(best.t - now);
-  judge(best, d <= WINDOW.PERFECT ? 'PERFECT' : d <= WINDOW.GREAT ? 'GREAT' : 'GOOD');
+  return judge(best, d <= WINDOW.PERFECT ? 'PERFECT' : d <= WINDOW.GREAT ? 'GREAT' : 'GOOD');
 }
 
 function perfKeydown(e) {
@@ -1321,14 +1418,32 @@ function perfKeydown(e) {
   if (perf.mode === 'free' && !e.repeat) {
     if (e.code === 'KeyZ') { shiftOctave(-1); return true; }
     if (e.code === 'KeyX') { shiftOctave(1); return true; }
+    if (e.code === 'Space') { setPedal(!perf.pedal); return true; }
   }
   const pc = KEYMAP[e.code];
-  if (pc !== undefined && !e.repeat) { perf.keyHeld[pc]++; pressKey(pc); }
+  if (pc !== undefined && !e.repeat) { perf.keyHeld[pc]++; heldVoices.set(e.code, pressKey(pc)); }
   return true;
 }
 function perfKeyup(e) {
   const pc = KEYMAP[e.code];
-  if (pc !== undefined) perf.keyHeld[pc] = Math.max(0, perf.keyHeld[pc] - 1);
+  if (pc === undefined) return;
+  perf.keyHeld[pc] = Math.max(0, perf.keyHeld[pc] - 1);
+  releaseHeld(e.code);
+}
+// each finger or key owns its voice, so several at once make a chord
+const heldVoices = new Map();
+function releaseHeld(id) {
+  const v = heldVoices.get(id);
+  heldVoices.delete(id);
+  if (v && perf.mode === 'free' && !perf.pedal) v.release();
+  else if (v && perf.pedal) pedalVoices.push(v);
+}
+const pedalVoices = [];
+function setPedal(on) {
+  perf.pedal = on;
+  $('pedalBtn').setAttribute('aria-pressed', String(on));
+  $('pedalBtn').textContent = on ? '페달 켬' : '페달 끔';
+  if (!on) { pedalVoices.splice(0).forEach((v) => v.release()); }
 }
 
 // --- keyboard + lane geometry (one octave, C to B) ---
@@ -1366,10 +1481,10 @@ rc.addEventListener('pointerdown', (e) => {
   const pc = keyAt(e.clientX - r.left, e.clientY - r.top);
   if (pc === null) return;
   e.preventDefault();
-  rc.setPointerCapture?.(e.pointerId);
+  try { rc.setPointerCapture(e.pointerId); } catch { /* capture is optional */ }
   pointerKeys.set(e.pointerId, pc);
   perf.keyHeld[pc]++;
-  pressKey(pc);
+  heldVoices.set(`p${e.pointerId}`, pressKey(pc));
 });
 rc.addEventListener('pointermove', (e) => {
   if (!pointerKeys.has(e.pointerId)) return;
@@ -1379,15 +1494,17 @@ rc.addEventListener('pointermove', (e) => {
   if (pc === null || pc === prev) return;
   // sliding across keys plays each one, like a glissando
   perf.keyHeld[prev] = Math.max(0, perf.keyHeld[prev] - 1);
+  releaseHeld(`p${e.pointerId}`);
   pointerKeys.set(e.pointerId, pc);
   perf.keyHeld[pc]++;
-  pressKey(pc);
+  heldVoices.set(`p${e.pointerId}`, pressKey(pc));
 });
 const releasePointer = (e) => {
   const pc = pointerKeys.get(e.pointerId);
   if (pc === undefined) return;
   perf.keyHeld[pc] = Math.max(0, perf.keyHeld[pc] - 1);
   pointerKeys.delete(e.pointerId);
+  releaseHeld(`p${e.pointerId}`);
 };
 rc.addEventListener('pointerup', releasePointer);
 rc.addEventListener('pointercancel', releasePointer);
