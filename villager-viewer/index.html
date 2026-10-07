@@ -126,6 +126,7 @@
     pointer-events: none;
   }
   input[type="file"] { display: none; }
+  [hidden] { display: none !important; }
 </style>
 
 <canvas id="stage" aria-label="3D 섬 화면"></canvas>
@@ -142,18 +143,22 @@
       <option value="auto">자동 (멈추면 대기, 움직이면 걷기)</option>
     </select>
   </label>
+  <label class="field" for="outfitSelect" id="outfitField" hidden>옷
+    <select id="outfitSelect"></select>
+  </label>
   <div class="row">
     <button class="btn" id="flip" type="button">방향 180° 돌리기</button>
     <button class="btn" id="reset" type="button">샘플로 되돌리기</button>
   </div>
-  <p class="status" id="status" role="status">샘플 주민으로 시작했어. 받은 .dae / .fbx / .glb 파일을 텍스처 이미지랑 같이 열거나 화면에 끌어다 놓으면 바뀌어.</p>
+  <p class="status" id="status" role="status">샘플 주민으로 시작했어. 받은 zip을 그대로 열거나 화면에 끌어다 놓으면 바뀌어.</p>
   <p class="note">파일은 이 브라우저 안에서만 읽어. 어디에도 업로드하지 않아.</p>
-  <input type="file" id="fileInput" multiple accept=".dae,.fbx,.glb,.gltf,.bin,.png,.jpg,.jpeg,.tga,.webp,.bmp">
+  <input type="file" id="fileInput" multiple accept=".zip,.dae,.fbx,.glb,.gltf,.bin,.png,.jpg,.jpeg,.tga,.webp,.bmp">
   <input type="file" id="folderInput" webkitdirectory multiple>
 </section>
 
 <div class="drop" id="drop" hidden>여기에 놓으면 캐릭터가 바뀌어</div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script type="importmap">
 {
   "imports": {
@@ -275,6 +280,78 @@ let mixer = null;
 let actions = [];       // { name, action }
 let idleAction = null, walkAction = null, current = null;
 let blobUrls = [];
+let rig = null;         // bones driven by code when a model has a skeleton but no clips
+let outfits = null;     // meshes that are alternative versions of the same clothing piece
+
+// Game rips often stack every clothing variant on the body (e.g. mTops__TshirtsN, mTops__OnepieceH).
+// Meshes sharing a name prefix and material are treated as variants and only one is shown.
+function setupOutfits(obj) {
+  const groups = new Map();
+  obj.traverse((o) => {
+    if (!o.isMesh || !o.name.includes('__')) return;
+    const mat = [].concat(o.material)[0]?.name || '';
+    const key = `${o.name.split('__')[0]}|${mat}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(o);
+  });
+  const set = [...groups.values()].filter((g) => g.length > 1).sort((a, b) => b.length - a.length)[0];
+  if (!set) return null;
+  set.sort((a, b) => a.name.localeCompare(b.name));
+  const sel = $('outfitSelect');
+  sel.innerHTML = '';
+  set.forEach((m, i) => {
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = m.name.split('__').slice(1).join('__');
+    sel.appendChild(opt);
+  });
+  const preferred = set.findIndex((m) => /N$/.test(m.name) && !/mydesign|emm/i.test(m.name));
+  sel.value = String(preferred >= 0 ? preferred : 0);
+  $('outfitField').hidden = false;
+  return set;
+}
+
+function showOutfit(i) {
+  outfits?.forEach((m, j) => { m.visible = j === i; });
+}
+
+// Animal Crossing style rigs share these bone names; other rigs fall back to a whole-body waddle.
+const RIG_BONES = {
+  legL: /^Leg_1_L$/i, legR: /^Leg_1_R$/i,
+  armL: /^Arm_1_L$/i, armR: /^Arm_1_R$/i,
+  spine: /^Spine_1$/i, head: /^Head$/i, tail: /^TailRoot$/i,
+};
+const AXIS_X = new THREE.Vector3(1, 0, 0);
+const AXIS_Y = new THREE.Vector3(0, 1, 0);
+const AXIS_Z = new THREE.Vector3(0, 0, 1);
+
+function setupRig(obj, frame) {
+  frame.updateMatrixWorld(true);
+  const frameInv = frame.getWorldQuaternion(new THREE.Quaternion()).invert();
+  // FBX exports can carry one copy of the skeleton per mesh, so every key holds all matching bones
+  const bones = {};
+  obj.traverse((o) => {
+    if (!o.isBone || !o.parent) return;
+    for (const [key, re] of Object.entries(RIG_BONES)) {
+      if (!re.test(o.name)) continue;
+      // parent orientation expressed in the character's own frame (+Y up, +Z forward)
+      const parentQ = frameInv.clone().multiply(o.parent.getWorldQuaternion(new THREE.Quaternion()));
+      (bones[key] ||= []).push({ bone: o, base: o.quaternion.clone(), parentQ, parentInv: parentQ.clone().invert() });
+    }
+  });
+  if (!bones.legL || !bones.legR) return null;
+  return bones;
+}
+
+const _dq = new THREE.Quaternion();
+// rotate bones by `angle` around an axis given in the character frame
+function turnBone(entries, axis, angle) {
+  if (!entries) return;
+  _dq.setFromAxisAngle(axis, angle);
+  for (const e of entries) {
+    e.bone.quaternion.copy(e.parentInv).multiply(_dq).multiply(e.parentQ).multiply(e.base);
+  }
+}
 
 function makeSample() {
   const root = new THREE.Group();
@@ -338,7 +415,8 @@ function clearAvatar() {
   }
   if (mixer) mixer.stopAllAction();
   mixer = null; actions = []; idleAction = walkAction = current = null;
-  sample = null; avatar = null;
+  sample = null; avatar = null; rig = null; outfits = null;
+  $('outfitField').hidden = true;
   blobUrls.forEach((u) => URL.revokeObjectURL(u));
   blobUrls = [];
   animSelect.innerHTML = '<option value="auto">자동 (멈추면 대기, 움직이면 걷기)</option>';
@@ -379,9 +457,48 @@ function play(action) {
   current = action;
 }
 
+async function expandZips(list) {
+  const out = [];
+  for (const f of list) {
+    if (!/\.zip$/i.test(f.name)) { out.push(f); continue; }
+    if (!window.JSZip) throw new Error('zip 라이브러리를 못 불러왔어. 압축을 풀어서 폴더 열기로 해줘.');
+    const zip = await JSZip.loadAsync(f);
+    for (const entry of Object.values(zip.files)) {
+      if (entry.dir || entry.name.includes('__MACOSX')) continue;
+      const blob = await entry.async('blob');
+      out.push(new File([blob], entry.name.split('/').pop()));
+    }
+  }
+  return out;
+}
+
+// Collada rips render more reliably than FBX ones; FBX materials often come out see-through.
+const MODEL_PRIORITY = ['glb', 'gltf', 'dae', 'fbx'];
+
+// ColladaLoader names bones by their sid (joint0, joint1, …). Restore the readable node names.
+async function restoreColladaBoneNames(file, obj) {
+  const doc = new DOMParser().parseFromString(await file.text(), 'application/xml');
+  const names = new Map();
+  for (const n of doc.querySelectorAll('node[type="JOINT"]')) {
+    const sid = n.getAttribute('sid'), name = n.getAttribute('name') || n.getAttribute('id');
+    if (sid && name) names.set(sid, name);
+  }
+  obj.traverse((o) => { if (o.isBone && names.has(o.name)) o.name = names.get(o.name); });
+}
+
 async function loadFiles(fileList) {
-  const files = [...fileList];
-  const main = files.find((f) => /\.(glb|gltf|fbx|dae)$/i.test(f.name));
+  let files;
+  try {
+    setStatus('파일 읽는 중…');
+    files = await expandZips([...fileList]);
+  } catch (err) {
+    setStatus(`zip 열기 실패: ${err?.message || err}`, true);
+    return;
+  }
+  const extOf = (f) => f.name.split('.').pop().toLowerCase();
+  const main = files
+    .filter((f) => MODEL_PRIORITY.includes(extOf(f)))
+    .sort((a, b) => MODEL_PRIORITY.indexOf(extOf(a)) - MODEL_PRIORITY.indexOf(extOf(b)))[0];
   if (!main) {
     setStatus('모델 파일(.dae .fbx .glb .gltf)을 못 찾았어. 모델 파일이랑 텍스처 이미지를 같이 골라줘.', true);
     return;
@@ -414,6 +531,7 @@ async function loadFiles(fileList) {
     if (ext === 'dae') {
       const c = await new ColladaLoader(manager).loadAsync(mainUrl);
       obj = c.scene; clips = c.scene.animations || [];
+      await restoreColladaBoneNames(main, obj);
     } else if (ext === 'fbx') {
       obj = await new FBXLoader(manager).loadAsync(mainUrl);
       clips = obj.animations || [];
@@ -461,9 +579,17 @@ async function loadFiles(fileList) {
     play(idleAction);
   }
 
+  if (!clips.length) rig = setupRig(obj, avatar);
+  // Animal Crossing rips include a placeholder hat mesh (Cap__…) that the game hides by default
+  obj.traverse((o) => { if (o.isMesh && /^Cap__/i.test(o.name)) o.visible = false; });
+  outfits = setupOutfits(obj);
+  if (outfits) showOutfit(Number($('outfitSelect').value));
+
   const animNote = clips.length
     ? `애니메이션 ${clips.length}개 찾았어.`
-    : '애니메이션이 없어서 통통 튀는 걸음으로 대신 움직여.';
+    : rig
+      ? '애니메이션은 없지만 뼈대를 찾아서 걷기 동작을 직접 붙였어.'
+      : '애니메이션이 없어서 통통 튀는 걸음으로 대신 움직여.';
   const texNote = missing.size
     ? ` 텍스처 ${missing.size}개를 못 찾았어 (${[...missing].slice(0, 3).join(', ')}${missing.size > 3 ? ' …' : ''}). 폴더 열기로 다시 해봐.`
     : '';
@@ -476,6 +602,7 @@ $('fileInput').addEventListener('change', (e) => { if (e.target.files.length) lo
 $('folderInput').addEventListener('change', (e) => { if (e.target.files.length) loadFiles(e.target.files); e.target.value = ''; });
 $('reset').addEventListener('click', () => { useSample(); setStatus('샘플 주민으로 돌아왔어.'); });
 $('flip').addEventListener('click', () => { turn.rotation.y = turn.rotation.y ? 0 : Math.PI; });
+$('outfitSelect').addEventListener('change', (e) => showOutfit(Number(e.target.value)));
 animSelect.addEventListener('change', () => {
   if (animSelect.value === 'auto') { current = null; mixer?.stopAllAction(); play(idleAction); return; }
   const a = actions.find((x) => x.name === animSelect.value);
@@ -582,6 +709,17 @@ function step(dt) {
     const bob = moving ? Math.abs(Math.sin(phase)) * 0.06 : (reduceMotion ? 0 : Math.sin(phase) * 0.015);
     sample.root.position.y = bob;
     sample.head.rotation.z = moving ? Math.sin(phase) * 0.06 : 0;
+  } else if (rig) {
+    const s = Math.sin(phase);
+    const k = moving ? 1 : 0;
+    turnBone(rig.legL, AXIS_X, s * 0.55 * k);
+    turnBone(rig.legR, AXIS_X, -s * 0.55 * k);
+    turnBone(rig.armL, AXIS_X, -s * 0.5 * k);
+    turnBone(rig.armR, AXIS_X, s * 0.5 * k);
+    turnBone(rig.spine, AXIS_Y, s * 0.08 * k);
+    turnBone(rig.head, AXIS_Z, moving ? s * 0.06 : (reduceMotion ? 0 : Math.sin(phase * 0.7) * 0.04));
+    turnBone(rig.tail, AXIS_Y, reduceMotion ? 0 : Math.sin(phase * (moving ? 1 : 1.6)) * 0.35);
+    avatar.position.y = moving ? Math.abs(s) * 0.05 : 0;
   } else if (avatar) {
     avatar.position.y = moving ? Math.abs(Math.sin(phase)) * 0.08 : 0;
     avatar.rotation.z = moving ? Math.sin(phase) * 0.07 : 0;
