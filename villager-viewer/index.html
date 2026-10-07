@@ -65,10 +65,27 @@
     text-overflow: ellipsis;
   }
 
+  .dock {
+    position: fixed;
+    left: 16px;
+    right: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none;
+  }
+  .dock > * { pointer-events: auto; }
+  .dock .btn { background: var(--panel); box-shadow: 0 4px 14px rgba(30, 60, 40, 0.18); }
+  .dock .btn.primary { background: var(--accent); }
+  .dock .btn[aria-expanded="true"] { border-color: var(--accent); }
   .card {
     position: fixed;
     left: 16px;
-    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+    max-height: calc(100% - 140px);
+    overflow-y: auto;
     width: min(340px, calc(100% - 32px));
     background: var(--panel);
     border: 1px solid var(--line);
@@ -131,9 +148,9 @@
 </style>
 
 <canvas id="stage" aria-label="3D 섬 화면"></canvas>
-<div class="hint" id="hint">WASD·방향키로 이동 · 땅을 탭하면 그 자리로 · 휠로 줌</div>
+<div class="hint" id="hint">WASD·방향키 이동 · 땅 탭으로 이동 · 휠 줌 · M 메뉴</div>
 
-<section class="card" aria-label="캐릭터 설정">
+<section class="card" id="panel" aria-label="캐릭터 설정" hidden>
   <h1>섬 산책 놀이터</h1>
   <div class="row">
     <button class="btn primary" id="openFiles" type="button">모델 파일 열기</button>
@@ -144,10 +161,6 @@
       <option value="auto">자동 (멈추면 대기, 움직이면 걷기)</option>
     </select>
   </label>
-  <div class="row">
-    <button class="btn primary" id="jumpBtn" type="button">점프 <kbd>Space</kbd></button>
-    <button class="btn primary" id="waveBtn" type="button">손 흔들기 <kbd>E</kbd></button>
-  </div>
   <label class="field" for="outfitSelect" id="outfitField" hidden>옷
     <select id="outfitSelect"></select>
   </label>
@@ -160,6 +173,14 @@
   <input type="file" id="fileInput" multiple accept=".zip,.dae,.fbx,.glb,.gltf,.bin,.png,.jpg,.jpeg,.tga,.webp,.bmp">
   <input type="file" id="folderInput" webkitdirectory multiple>
 </section>
+
+<div class="dock">
+  <button class="btn" id="menuBtn" type="button" aria-controls="panel" aria-expanded="false">메뉴 열기</button>
+  <div class="row">
+    <button class="btn primary" id="jumpBtn" type="button">점프 <kbd>Space</kbd></button>
+    <button class="btn primary" id="waveBtn" type="button">손 흔들기 <kbd>E</kbd></button>
+  </div>
+</div>
 
 <div class="drop" id="drop" hidden>여기에 놓으면 캐릭터가 바뀌어</div>
 
@@ -187,7 +208,16 @@ const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 function setStatus(msg, isError = false) {
   statusEl.textContent = msg;
   statusEl.classList.toggle('error', isError);
+  if (isError) setPanel(true); // errors are only visible inside the panel
 }
+
+// the settings panel starts closed so the character stays in view; M toggles it too
+function setPanel(open) {
+  $('panel').hidden = !open;
+  $('menuBtn').setAttribute('aria-expanded', String(open));
+  $('menuBtn').textContent = open ? '메뉴 닫기' : '메뉴 열기';
+}
+$('menuBtn').addEventListener('click', (e) => { setPanel($('panel').hidden); e.currentTarget.blur(); });
 
 // ---------- scene ----------
 const canvas = $('stage');
@@ -640,6 +670,7 @@ addEventListener('keydown', (e) => {
   if (MOVE_KEYS[e.code]) { keys.add(e.code); target = null; marker.visible = false; e.preventDefault(); }
   if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) jump(); }
   if (e.code === 'KeyE' && !e.repeat) wave();
+  if (e.code === 'KeyM' && !e.repeat) setPanel($('panel').hidden);
 });
 
 // ---------- actions ----------
